@@ -57,13 +57,15 @@
         </div>
     </section>
 
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script src="js/core/i18n.js"></script>
     <script src="js/seed-data.js"></script>
     <script src="js/core/app.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-            
+
             const profilePic = document.getElementById('navProfilePic');
             if (user.profilePic) {
                 profilePic.innerHTML = `<img src="${user.profilePic}" style="width: 100%; height: 100%; border-radius: 50%; object-fit: cover;">`;
@@ -71,49 +73,65 @@
                 const initials = user.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
                 profilePic.textContent = initials;
             }
-            
-            const assignments = JSON.parse(localStorage.getItem('assignments') || '[]')
-                .filter(a => a.teacherId === user.id)
-                .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
-            
-            const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
+
             const container = document.getElementById('assignmentsList');
-            
+
+            let assignments = [];
+            try {
+                assignments = (await Data.assignments.list({ mine: 'true' }))
+                    .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0));
+            } catch (error) {
+                console.error('Failed to load assignments', error);
+                container.innerHTML = '<p>Failed to load assignments.</p>';
+                translatePage();
+                return;
+            }
+
             if (assignments.length === 0) {
                 container.innerHTML = '<p data-i18n="noAssignmentsYet">No assignments yet. Create your first assignment!</p>';
             } else {
-                container.innerHTML = assignments.map(assignment => {
-                    const assignmentSubmissions = submissions.filter(s => s.assignmentId === assignment.id);
+                const withCounts = await Promise.all(assignments.map(async assignment => {
+                    let submissionCount = 0;
+                    try {
+                        const subs = await Data.submissions.getForAssignment(assignment._id);
+                        submissionCount = subs.length;
+                    } catch (error) {
+                        console.warn('Failed to load submissions for assignment', assignment._id, error);
+                    }
+                    return { assignment, submissionCount };
+                }));
+
+                container.innerHTML = withCounts.map(({ assignment, submissionCount }) => {
                     const dueDate = new Date(assignment.dueDate);
                     const isPast = dueDate < new Date();
-                    
+
                     return `
                         <div class="activity-item">
                             <i class="fas fa-file-alt" style="color: ${isPast ? '#ef4444' : '#2563eb'};"></i>
                             <div style="flex: 1;">
                                 <strong>${assignment.title}</strong>
                                 <p style="color: #6b7280; margin: 5px 0 0 0;">
-                                    <span data-i18n="subject">Subject</span>: ${assignment.subject} • 
-                                    <span data-i18n="due">Due</span>: ${dueDate.toLocaleDateString()} • 
-                                    ${assignmentSubmissions.length} <span data-i18n="submissions">submissions</span> • 
-                                    ${assignment.totalPoints} <span data-i18n="points">points</span>
+                                    <span data-i18n="subject">Subject</span>: ${assignment.subject} •
+                                    <span data-i18n="due">Due</span>: ${dueDate.toLocaleDateString()} •
+                                    ${submissionCount} <span data-i18n="submissions">submissions</span> •
+                                    <span class="badge">${assignment.status}</span>
                                 </p>
                             </div>
-                            <button class="btn btn-primary btn-sm" onclick="viewAssignment(${assignment.id})">
+                            <button class="btn btn-primary btn-sm" onclick="viewAssignment('${assignment._id}')">
                                 <span data-i18n="view">View</span>
                             </button>
                         </div>
                     `;
                 }).join('');
             }
-            
+
             translatePage();
         });
-        
+
         function viewAssignment(id) {
             alert('Assignment details view - Coming soon!');
         }
-        
+
         // Mobile menu toggle
         document.getElementById('navToggle')?.addEventListener('click', () => {
             document.querySelector('.nav-menu')?.classList.toggle('active');

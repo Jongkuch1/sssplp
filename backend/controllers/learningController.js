@@ -39,9 +39,9 @@ const getModulesBySubject = async (req, res) => {
 // Create learning module (teachers only)
 const createLearningModule = async (req, res) => {
   try {
-    const { title, content, subject, grade, difficulty, estimatedDuration, objectives, resources } = req.body;
-    
-    if (req.user.role !== 'teacher' && req.user.role !== 'administrator') {
+    const { title, content, subject, grade, description, difficulty, estimatedDuration, objectives, resources } = req.body;
+
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Only teachers and administrators can create modules' });
     }
 
@@ -50,11 +50,12 @@ const createLearningModule = async (req, res) => {
       content,
       subject,
       grade,
+      description,
       difficulty,
       estimatedDuration,
       objectives,
       resources,
-      createdBy: req.user._id
+      createdBy: req.user.id
     });
 
     await module.populate('createdBy', 'name');
@@ -68,13 +69,13 @@ const createLearningModule = async (req, res) => {
 const getQuizzes = async (req, res) => {
   try {
     const { subject, grade } = req.query;
-    const filter = { isActive: true };
-    
+    const filter = { status: 'approved' };
+
     if (subject) filter.subject = subject;
     if (grade) filter.grade = grade;
 
     const quizzes = await Quiz.find(filter)
-      .populate('createdBy', 'name')
+      .populate('teacherId', 'name')
       .sort({ createdAt: -1 });
     
     res.json(quizzes);
@@ -86,9 +87,9 @@ const getQuizzes = async (req, res) => {
 // Create quiz (teachers only)
 const createQuiz = async (req, res) => {
   try {
-    const { title, subject, grade, description, questions, timeLimit, passingScore, maxAttempts } = req.body;
-    
-    if (req.user.role !== 'teacher' && req.user.role !== 'administrator') {
+    const { title, subject, grade, questions, timeLimit } = req.body;
+
+    if (req.user.role !== 'teacher' && req.user.role !== 'admin') {
       return res.status(403).json({ message: 'Only teachers and administrators can create quizzes' });
     }
 
@@ -96,15 +97,12 @@ const createQuiz = async (req, res) => {
       title,
       subject,
       grade,
-      description,
       questions,
       timeLimit,
-      passingScore,
-      maxAttempts,
-      createdBy: req.user._id
+      teacherId: req.user.id
     });
 
-    await quiz.populate('createdBy', 'name');
+    await quiz.populate('teacherId', 'name');
     res.status(201).json(quiz);
   } catch (error) {
     res.status(500).json({ message: 'Error creating quiz', error: error.message });
@@ -114,7 +112,7 @@ const createQuiz = async (req, res) => {
 // Get student progress
 const getProgress = async (req, res) => {
   try {
-    const progress = await Progress.find({ userId: req.user._id })
+    const progress = await Progress.find({ userId: req.user.id })
       .populate('moduleId', 'title subject grade')
       .sort({ lastAccessed: -1 });
     
@@ -129,10 +127,10 @@ const updateProgress = async (req, res) => {
   try {
     const { moduleId, progressPercentage, timeSpent, status } = req.body;
     
-    let progress = await Progress.findOne({ userId: req.user._id, moduleId });
-    
+    let progress = await Progress.findOne({ userId: req.user.id, moduleId });
+
     if (!progress) {
-      progress = new Progress({ userId: req.user._id, moduleId });
+      progress = new Progress({ userId: req.user.id, moduleId });
     }
     
     if (progressPercentage !== undefined) progress.progressPercentage = progressPercentage;
@@ -160,46 +158,30 @@ const submitQuizAttempt = async (req, res) => {
     if (!quiz) {
       return res.status(404).json({ message: 'Quiz not found' });
     }
-    
-    // Check attempt limit
-    const attemptCount = await QuizAttempt.countDocuments({ 
-      userId: req.user._id, 
-      quizId,
-      status: 'completed'
-    });
-    
-    if (attemptCount >= quiz.maxAttempts) {
-      return res.status(400).json({ message: 'Maximum attempts exceeded' });
-    }
-    
-    // Calculate score
+
+    // Calculate score (each question is worth 1 point; correctAnswer is the index into options)
     let totalPoints = 0;
-    let maxPoints = 0;
+    const maxPoints = quiz.questions.length;
     const processedAnswers = [];
-    
+
     quiz.questions.forEach((question, index) => {
       const userAnswer = answers[index];
-      const isCorrect = question.type === 'multiple-choice' 
-        ? question.options.find(opt => opt.isCorrect)?.text === userAnswer?.selectedAnswer
-        : question.correctAnswer === userAnswer?.selectedAnswer;
-      
-      const pointsEarned = isCorrect ? question.points : 0;
+      const isCorrect = question.correctAnswer === userAnswer?.selectedAnswer;
+      const pointsEarned = isCorrect ? 1 : 0;
       totalPoints += pointsEarned;
-      maxPoints += question.points;
-      
+
       processedAnswers.push({
         questionId: question._id,
-        selectedAnswer: userAnswer?.selectedAnswer || '',
+        selectedAnswer: userAnswer?.selectedAnswer ?? '',
         isCorrect,
         pointsEarned
       });
     });
-    
+
     const score = maxPoints > 0 ? Math.round((totalPoints / maxPoints) * 100) : 0;
-    const passed = score >= quiz.passingScore;
-    
+
     const attempt = await QuizAttempt.create({
-      userId: req.user._id,
+      userId: req.user.id,
       quizId,
       answers: processedAnswers,
       score,
@@ -208,7 +190,7 @@ const submitQuizAttempt = async (req, res) => {
       timeSpent,
       completedAt: new Date(),
       status: 'completed',
-      passed
+      passed: score >= 50
     });
     
     await attempt.populate('quizId', 'title subject grade');
@@ -218,13 +200,20 @@ const submitQuizAttempt = async (req, res) => {
   }
 };
 
-// Get quiz attempts
+// Get quiz attempts (own attempts; teacher/admin may pass ?studentId= or ?all=true)
 const getQuizAttempts = async (req, res) => {
   try {
-    const attempts = await QuizAttempt.find({ userId: req.user._id })
+    let filter = { userId: req.user.id };
+    if (req.user.role !== 'student') {
+      if (req.query.studentId) filter = { userId: req.query.studentId };
+      else if (req.query.all === 'true') filter = {};
+    }
+
+    const attempts = await QuizAttempt.find(filter)
       .populate('quizId', 'title subject grade')
+      .populate('userId', 'name email')
       .sort({ createdAt: -1 });
-    
+
     res.json(attempts);
   } catch (error) {
     res.status(500).json({ message: 'Error fetching quiz attempts', error: error.message });

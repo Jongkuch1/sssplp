@@ -1,35 +1,26 @@
 // Teacher Dashboard Features - FR05, FR06, FR10, FR12
+// Backed by the real API via window.Data; all methods that touch shared
+// data are now async and must be awaited by callers.
 const TeacherFeatures = {
     // FR10: Course Management
-    createCourse(courseData) {
-        const courses = JSON.parse(localStorage.getItem('courses') || '[]');
-        const course = {
-            id: Date.now(),
-            ...courseData,
-            createdAt: Date.now(),
-            status: 'draft'
-        };
-        courses.push(course);
-        localStorage.setItem('courses', JSON.stringify(courses));
+    async createCourse(courseData) {
+        const course = await Data.courses.create(courseData);
         Universal.showToast('Course created', 'success');
         return course;
     },
 
-    updateCourse(courseId, updates) {
-        const courses = JSON.parse(localStorage.getItem('courses') || '[]');
-        const index = courses.findIndex(c => c.id == courseId);
-        if (index !== -1) {
-            courses[index] = { ...courses[index], ...updates, updatedAt: Date.now() };
-            localStorage.setItem('courses', JSON.stringify(courses));
-            Universal.showToast('Course updated', 'success');
-        }
+    async updateCourse(courseId, updates) {
+        const course = await Data.courses.update(courseId, updates);
+        Universal.showToast('Course updated', 'success');
+        return course;
     },
 
-    getCourses() {
-        return JSON.parse(localStorage.getItem('courses') || '[]');
+    async getCourses() {
+        return await Data.courses.list({ mine: 'true' });
     },
 
-    // FR10: Resource Upload with Retry
+    // FR10: Resource Upload — no backend file-storage model exists yet (link/metadata
+    // only); intentionally left on localStorage until a storage strategy is decided.
     uploadResource(file, metadata, onProgress) {
         return new Promise((resolve, reject) => {
             const chunkSize = 1024 * 1024; // 1MB chunks
@@ -97,72 +88,57 @@ const TeacherFeatures = {
     },
 
     // FR12: Assignment Builder
-    createAssignment(assignmentData) {
-        const assignments = JSON.parse(localStorage.getItem('assignments') || '[]');
-        const assignment = {
-            id: Date.now(),
-            ...assignmentData,
-            createdAt: Date.now(),
-            submissions: []
-        };
-        assignments.push(assignment);
-        localStorage.setItem('assignments', JSON.stringify(assignments));
+    async createAssignment(assignmentData) {
+        const assignment = await Data.assignments.create(assignmentData);
         Universal.showToast('Assignment created', 'success');
         return assignment;
     },
 
-    getAssignments() {
-        return JSON.parse(localStorage.getItem('assignments') || '[]');
+    async getAssignments() {
+        return await Data.assignments.list({ mine: 'true' });
     },
 
     // FR12: Grading
-    gradeSubmission(submissionId, grade, comments) {
-        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-        const index = submissions.findIndex(s => s.id == submissionId);
-        if (index !== -1) {
-            submissions[index].grade = grade;
-            submissions[index].comments = comments;
-            submissions[index].gradedAt = Date.now();
-            submissions[index].status = 'graded';
-            localStorage.setItem('submissions', JSON.stringify(submissions));
-            Universal.showToast('Submission graded', 'success');
-        }
+    async gradeSubmission(submissionId, grade, comments) {
+        const submission = await Data.submissions.grade(submissionId, { grade, comments });
+        Universal.showToast('Submission graded', 'success');
+        return submission;
     },
 
-    bulkGrade(submissionIds, grade) {
-        submissionIds.forEach(id => this.gradeSubmission(id, grade, 'Bulk graded'));
+    async bulkGrade(submissionIds, grade) {
+        await Promise.all(submissionIds.map(id => this.gradeSubmission(id, grade, 'Bulk graded')));
         Universal.showToast(`${submissionIds.length} submissions graded`, 'success');
     },
 
-    getSubmissions(assignmentId) {
-        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-        return assignmentId ? submissions.filter(s => s.assignmentId == assignmentId) : submissions;
+    async getSubmissions(assignmentId) {
+        return await Data.submissions.getForAssignment(assignmentId);
     },
 
     // FR06: Student Progress View
-    getStudentProgress(studentId) {
-        const attempts = JSON.parse(localStorage.getItem('quizAttempts') || '[]');
-        const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-        
-        const studentAttempts = attempts.filter(a => a.studentId == studentId);
-        const studentSubmissions = submissions.filter(s => s.studentId == studentId);
-        
+    async getStudentProgress(studentId) {
+        const [attempts, submissions] = await Promise.all([
+            Data.learning.getQuizAttempts({ studentId }),
+            Data.submissions.getForStudent(studentId)
+        ]);
+
         return {
-            quizzes: studentAttempts,
-            assignments: studentSubmissions,
-            avgScore: this.calculateAverage(studentAttempts),
-            completion: this.calculateCompletion(studentSubmissions)
+            quizzes: attempts,
+            assignments: submissions,
+            avgScore: this.calculateAverage(attempts),
+            completion: this.calculateCompletion(submissions)
         };
     },
 
-    getClassSummary() {
-        const students = JSON.parse(localStorage.getItem('users') || '[]')
-            .filter(u => u.role === 'student');
-        const attempts = JSON.parse(localStorage.getItem('quizAttempts') || '[]');
-        
+    async getClassSummary() {
+        const [users, attempts] = await Promise.all([
+            Data.users.list(),
+            Data.learning.getQuizAttempts({ all: 'true' })
+        ]);
+        const students = users.filter(u => u.role === 'student');
+
         return {
             totalStudents: students.length,
-            activeStudents: new Set(attempts.map(a => a.studentId)).size,
+            activeStudents: new Set(attempts.map(a => a.userId?._id || a.userId)).size,
             avgClassScore: this.calculateAverage(attempts),
             totalAttempts: attempts.length
         };
@@ -180,7 +156,8 @@ const TeacherFeatures = {
         return Math.round((completed / submissions.length) * 100);
     },
 
-    // FR05: Tutoring Schedule Management
+    // FR05: Tutoring Schedule Management — "available slots" has no backend model
+    // (Meeting only stores actual scheduled meetings), intentionally left local.
     setAvailability(slots) {
         const availability = JSON.parse(localStorage.getItem('teacherAvailability') || '{}');
         const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
@@ -195,10 +172,10 @@ const TeacherFeatures = {
         return availability[user.email] || [];
     },
 
-    getBookings() {
-        const bookings = JSON.parse(localStorage.getItem('bookings') || '[]');
-        const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-        return bookings.filter(b => b.tutorId === user.email);
+    async getBookings() {
+        const me = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        const meetings = await Data.meetings.list();
+        return meetings.filter(m => (m.teacherId?._id || m.teacherId) === me.id);
     }
 };
 
@@ -207,21 +184,21 @@ document.addEventListener('DOMContentLoaded', () => {
     if (window.location.pathname.includes('teacher-dashboard')) {
         loadTeacherDashboard();
     }
-    
+
     // Retry uploads on reconnect
     window.addEventListener('online', () => TeacherFeatures.retryUploads());
 });
 
-function loadTeacherDashboard() {
-    const summary = TeacherFeatures.getClassSummary();
-    const courses = TeacherFeatures.getCourses();
-    const bookings = TeacherFeatures.getBookings();
-    
+async function loadTeacherDashboard() {
+    const summary = await TeacherFeatures.getClassSummary();
+    const courses = await TeacherFeatures.getCourses();
+    const bookings = await TeacherFeatures.getBookings();
+
     document.getElementById('totalStudents').textContent = summary.totalStudents;
     document.getElementById('activeStudents').textContent = summary.activeStudents;
     document.getElementById('avgClassScore').textContent = summary.avgClassScore + '%';
     document.getElementById('totalCourses').textContent = courses.length;
-    
+
     // Upcoming sessions
     const upcoming = bookings.filter(b => new Date(b.datetime) > new Date());
     const sessionsContainer = document.getElementById('upcomingSessions');

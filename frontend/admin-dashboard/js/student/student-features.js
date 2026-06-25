@@ -1,23 +1,28 @@
 // Student Dashboard Features - FR02, FR06, FR12
+// Backed by the real API via window.Data; all methods that touch shared
+// data are now async and must be awaited by callers.
 const StudentFeatures = {
     // FR02: Adaptive Learning Engine
-    getRecommendations() {
-        const progress = JSON.parse(localStorage.getItem('studentProgress') || '{}');
-        const weakSubjects = Object.entries(progress)
-            .filter(([_, score]) => score < 60)
-            .map(([subject]) => subject);
-        
-        return weakSubjects.length ? weakSubjects : ['Mathematics', 'English'];
+    async getRecommendations() {
+        try {
+            const me = JSON.parse(localStorage.getItem('currentUser') || '{}');
+            const profiles = await Data.adaptive.getProfile(me.id);
+            const list = Array.isArray(profiles) ? profiles : [];
+            const weakSubjects = list.filter(p => p.performance < 0.6).map(p => p.subject);
+            return weakSubjects.length ? weakSubjects : ['Mathematics', 'English Language'];
+        } catch (error) {
+            return ['Mathematics', 'English Language'];
+        }
     },
 
-    calculateProgress() {
-        const attempts = JSON.parse(localStorage.getItem('quizAttempts') || '[]');
+    async calculateProgress() {
+        const attempts = await Data.learning.getQuizAttempts();
         const total = attempts.length;
-        const passed = attempts.filter(a => a.score >= 60).length;
+        const passed = attempts.filter(a => a.passed).length;
         return total ? Math.round((passed / total) * 100) : 0;
     },
 
-    // FR04: Offline Download Manager
+    // FR04: Offline Download Manager - inherently per-device, stays in localStorage
     downloadContent(subjectId, content) {
         const downloads = JSON.parse(localStorage.getItem('downloadedAssets') || '[]');
         downloads.push({
@@ -35,146 +40,116 @@ const StudentFeatures = {
         return JSON.parse(localStorage.getItem('downloadedAssets') || '[]');
     },
 
-    // FR12: Quiz Player with Offline Support
+    // FR12: Quiz Player
+    async getQuizzes() {
+        return await Data.learning.getQuizzes();
+    },
+
+    async getQuiz(quizId) {
+        const quizzes = await Data.learning.getQuizzes();
+        return quizzes.find(q => q._id === quizId) || quizzes[0];
+    },
+
     startQuiz(quizId) {
-        const quiz = this.getQuiz(quizId);
         localStorage.setItem('currentQuiz', JSON.stringify({
             quizId,
             startTime: Date.now(),
-            answers: {},
-            offline: !navigator.onLine
+            answers: {}
         }));
-        return quiz;
     },
 
-    saveQuizAnswer(questionId, answer) {
+    saveQuizAnswer(questionIndex, answer) {
         const current = JSON.parse(localStorage.getItem('currentQuiz') || '{}');
-        current.answers[questionId] = answer;
+        current.answers = current.answers || {};
+        current.answers[questionIndex] = answer;
         current.lastSaved = Date.now();
         localStorage.setItem('currentQuiz', JSON.stringify(current));
     },
 
-    submitQuiz() {
+    async submitQuiz() {
         const current = JSON.parse(localStorage.getItem('currentQuiz') || '{}');
-        const quiz = this.getQuiz(current.quizId);
-        
-        let score = 0;
-        Object.entries(current.answers).forEach(([qId, answer]) => {
-            const question = quiz.questions.find(q => q.id == qId);
-            if (question && question.correct === answer) score++;
-        });
-        
-        const attempt = {
+        const answerEntries = Object.entries(current.answers || {})
+            .sort((a, b) => Number(a[0]) - Number(b[0]));
+        const answers = answerEntries.map(([, selectedAnswer]) => ({ selectedAnswer }));
+        const timeSpent = current.startTime ? Math.round((Date.now() - current.startTime) / 60000) : 0;
+
+        const attempt = await Data.learning.submitQuizAttempt({
             quizId: current.quizId,
-            score: Math.round((score / quiz.questions.length) * 100),
-            answers: current.answers,
-            timestamp: Date.now(),
-            synced: navigator.onLine
-        };
-
-        const attempts = JSON.parse(localStorage.getItem('quizAttempts') || '[]');
-        attempts.push(attempt);
-        localStorage.setItem('quizAttempts', JSON.stringify(attempts));
-
-        if (!navigator.onLine) {
-            Universal.queueOfflineActivity('quiz_submit', attempt);
-        }
+            answers,
+            timeSpent
+        });
 
         localStorage.removeItem('currentQuiz');
         return attempt;
     },
 
-    getQuiz(quizId) {
-        const quizzes = {
-            math1: {
-                id: 'math1',
-                title: 'Algebra Basics',
-                subject: 'Mathematics',
-                questions: [
-                    { id: 1, text: 'What is 2 + 2?', options: ['3', '4', '5', '6'], correct: 1 },
-                    { id: 2, text: 'Solve: x + 5 = 10', options: ['3', '5', '7', '10'], correct: 1 }
-                ]
-            }
-        };
-        return quizzes[quizId] || quizzes.math1;
-    },
-
     // FR05: Tutoring Booking
-    bookTutoring(tutorId, datetime, type) {
-        const booking = {
-            id: Date.now(),
-            tutorId,
-            datetime,
-            type,
-            status: 'pending',
-            meetLink: 'https://meet.google.com/zce-wnss-vvr'
-        };
+    async bookTutoring(teacherId, datetime, type) {
+        const teachers = await Data.users.list();
+        const teacher = teachers.find(t => t._id === teacherId);
+        const me = JSON.parse(localStorage.getItem('currentUser') || '{}');
 
-        const bookings = JSON.parse(localStorage.getItem('bookings') || '[]');
-        bookings.push(booking);
-        localStorage.setItem('bookings', JSON.stringify(bookings));
+        const meeting = await Data.meetings.create({
+            teacherId,
+            teacherName: teacher ? teacher.name : 'Teacher',
+            studentId: me.id,
+            studentEmail: me.email,
+            title: `${type} Tutoring Session`,
+            subject: (teacher && teacher.subjects && teacher.subjects[0]) || 'General',
+            type,
+            datetime,
+            meetLink: 'https://meet.google.com/zce-wnss-vvr'
+        });
 
         Universal.showToast('Tutoring session booked', 'success');
-        return booking;
+        return meeting;
     },
 
-    getUpcomingSessions() {
-        const bookings = JSON.parse(localStorage.getItem('bookings') || '[]');
-        return bookings.filter(b => new Date(b.datetime) > new Date());
+    async getUpcomingSessions() {
+        const me = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        const meetings = await Data.meetings.listForStudent(me.id, me.email);
+        return meetings.filter(m => new Date(m.datetime) > new Date());
     },
 
     // FR11: Student-Tutor Messaging
-    sendMessage(recipientId, message) {
-        const messages = JSON.parse(localStorage.getItem('messages') || '[]');
-        const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-        
-        messages.push({
-            id: Date.now(),
-            from: user.email,
-            to: recipientId,
-            message,
-            timestamp: Date.now(),
-            read: false
-        });
-
-        localStorage.setItem('messages', JSON.stringify(messages));
-        
-        if (!navigator.onLine) {
-            Universal.queueOfflineActivity('send_message', { recipientId, message });
-        }
+    async sendMessage(recipientId, message) {
+        const me = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        return await Data.messages.send({ from: me.id, to: recipientId, text: message });
     },
 
-    getUnreadMessages() {
-        const messages = JSON.parse(localStorage.getItem('messages') || '[]');
-        const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-        return messages.filter(m => m.to === user.email && !m.read);
+    async getUnreadMessages() {
+        const me = JSON.parse(localStorage.getItem('currentUser') || '{}');
+        if (!me.id) return [];
+        const messages = await Data.messages.getAllForUser(me.id);
+        return messages.filter(m => (m.to?._id || m.to) === me.id && !m.read);
     }
 };
 
 // FR06: Progress Tracking
 const ProgressTracker = {
-    updateProgress(subject, score) {
-        const progress = JSON.parse(localStorage.getItem('studentProgress') || '{}');
-        progress[subject] = score;
-        localStorage.setItem('studentProgress', JSON.stringify(progress));
-        Universal.logActivity('progress_update', { subject, score });
+    async updateProgress(moduleId, progressPercentage, status) {
+        const result = await Data.learning.updateProgress({ moduleId, progressPercentage, status });
+        Universal.logActivity('progress_update', { moduleId, progressPercentage, status });
+        return result;
     },
 
-    getProgressData() {
-        const progress = JSON.parse(localStorage.getItem('studentProgress') || '{}');
-        const attempts = JSON.parse(localStorage.getItem('quizAttempts') || '[]');
-        
+    async getProgressData() {
+        const [progress, attempts] = await Promise.all([
+            Data.learning.getProgress(),
+            Data.learning.getQuizAttempts()
+        ]);
+
         return {
-            overall: StudentFeatures.calculateProgress(),
+            overall: await StudentFeatures.calculateProgress(),
             subjects: progress,
-            recentAttempts: attempts.slice(-5),
+            recentAttempts: attempts.slice(0, 5),
             timeSpent: this.calculateTimeSpent()
         };
     },
 
     calculateTimeSpent() {
         const logs = JSON.parse(localStorage.getItem('activityLogs') || '[]');
-        const today = new Date().setHours(0,0,0,0);
+        const today = new Date().setHours(0, 0, 0, 0);
         const todayLogs = logs.filter(l => l.timestamp >= today);
         return todayLogs.length * 5; // Estimate 5 min per activity
     }
@@ -187,15 +162,15 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-function loadStudentDashboard() {
-    const recommendations = StudentFeatures.getRecommendations();
-    const progress = ProgressTracker.getProgressData();
-    const upcoming = StudentFeatures.getUpcomingSessions();
-    
-    // Update dashboard UI
+async function loadStudentDashboard() {
+    const recommendations = await StudentFeatures.getRecommendations();
+    const progress = await ProgressTracker.getProgressData();
+    const upcoming = await StudentFeatures.getUpcomingSessions();
+
+    // Update dashboard UI (timeSpent is owned by a live per-minute session timer
+    // in student-dashboard.html's inline script, not duplicated here)
     document.getElementById('overallProgress').textContent = progress.overall + '%';
-    document.getElementById('timeSpent').textContent = progress.timeSpent + ' min';
-    
+
     // Recommendations
     const recContainer = document.getElementById('recommendations');
     if (recContainer) {
@@ -219,7 +194,7 @@ function loadStudentDashboard() {
         sessionsContainer.innerHTML = upcoming.length ? upcoming.map(s => `
             <div class="session-card">
                 <div>
-                    <strong>${s.tutorName || 'Tutor'}</strong>
+                    <strong>${s.teacherName || 'Tutor'}</strong>
                     <p>${new Date(s.datetime).toLocaleString()}</p>
                     <small>${s.type} session</small>
                 </div>

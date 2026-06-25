@@ -72,101 +72,108 @@
         </div>
     </section>
 
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script src="js/core/i18n.js"></script>
     <script src="js/seed-data.js"></script>
     <script src="js/core/app.js"></script>
     <script src="js/load-profile.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
+        let assignmentsCache = [];
+        let mySubmissionsCache = [];
+
+        async function loadAssignments() {
             const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-            
+
             if (user.profilePicture) {
                 document.getElementById('navProfilePic').src = user.profilePicture;
             }
-            
-            const assignments = JSON.parse(localStorage.getItem('assignments') || '[]')
-                .filter(a => a.status === 'active');
-            const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-            const mySubmissions = submissions.filter(s => s.studentId === user.id);
-            
+
+            const container = document.getElementById('assignmentsList');
+
+            try {
+                [assignmentsCache, mySubmissionsCache] = await Promise.all([
+                    Data.assignments.list(),
+                    Data.submissions.getForStudent(user.id)
+                ]);
+            } catch (error) {
+                console.error('Failed to load assignments/submissions', error);
+                container.innerHTML = '<p>Failed to load assignments.</p>';
+                translatePage();
+                return;
+            }
+
+            const assignments = assignmentsCache;
+            const mySubmissions = mySubmissionsCache;
+
             // Calculate stats
-            const pending = assignments.filter(a => !mySubmissions.find(s => s.assignmentId === a.id) && new Date(a.dueDate) > new Date());
+            const pending = assignments.filter(a => !mySubmissions.find(s => (s.assignmentId?._id || s.assignmentId) === a._id) && new Date(a.dueDate) > new Date());
             const submitted = mySubmissions.filter(s => s.status === 'submitted');
             const graded = mySubmissions.filter(s => s.status === 'graded');
-            
+
             document.getElementById('pendingCount').textContent = pending.length;
             document.getElementById('submittedCount').textContent = submitted.length;
             document.getElementById('gradedCount').textContent = graded.length;
-            
-            // Display assignments
-            const container = document.getElementById('assignmentsList');
-            console.log('Total assignments in system:', assignments.length);
-            console.log('My submissions:', mySubmissions.length);
-            
+
             if (assignments.length === 0) {
                 container.innerHTML = '<p data-i18n="noAssignmentsAvailable">No assignments available yet. Your teacher will post assignments here.</p>';
             } else {
                 container.innerHTML = assignments.map(assignment => {
-                    const submission = mySubmissions.find(s => s.assignmentId === assignment.id);
+                    const submission = mySubmissions.find(s => (s.assignmentId?._id || s.assignmentId) === assignment._id);
                     const dueDate = new Date(assignment.dueDate);
                     const isPast = dueDate < new Date();
                     const status = submission ? (submission.status === 'graded' ? 'Graded' : 'Submitted') : (isPast ? 'Overdue' : 'Pending');
                     const statusColor = submission ? (submission.status === 'graded' ? '#10b981' : '#f59e0b') : (isPast ? '#ef4444' : '#6b7280');
-                    
+
                     return `
                         <div class="activity-item" style="margin-bottom: 15px;">
                             <i class="fas fa-file-alt" style="color: ${statusColor};"></i>
                             <div style="flex: 1;">
                                 <strong>${assignment.title}</strong>
                                 <p style="color: #6b7280; margin: 5px 0 0 0;">
-                                    ${assignment.subject} • Due: ${dueDate.toLocaleDateString()} • ${assignment.totalPoints} points
-                                    ${submission && submission.grade ? ` • Grade: ${submission.grade}/${assignment.totalPoints}` : ''}
+                                    ${assignment.subject} • Due: ${dueDate.toLocaleDateString()}
+                                    ${submission && submission.grade != null ? ` • Grade: ${submission.grade}/100` : ''}
                                 </p>
                             </div>
                             <span style="padding: 5px 15px; background: ${statusColor}; color: white; border-radius: 20px; font-size: 14px; margin-right: 10px;">
                                 ${status}
                             </span>
-                            ${!submission && !isPast ? `<button class="btn btn-primary btn-sm" onclick="submitAssignment(${assignment.id})">Submit</button>` : ''}
-                            ${submission ? `<button class="btn btn-secondary btn-sm" onclick="viewSubmission(${assignment.id})">View</button>` : ''}
+                            ${!submission && !isPast ? `<button class="btn btn-primary btn-sm" onclick="submitAssignment('${assignment._id}')">Submit</button>` : ''}
+                            ${submission ? `<button class="btn btn-secondary btn-sm" onclick="viewSubmission('${assignment._id}')">View</button>` : ''}
                         </div>
                     `;
                 }).join('');
             }
-            
+
             translatePage();
-        });
-        
-        function submitAssignment(assignmentId) {
-            const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-            const assignment = JSON.parse(localStorage.getItem('assignments') || '[]').find(a => a.id === assignmentId);
-            
+        }
+
+        document.addEventListener('DOMContentLoaded', loadAssignments);
+
+        async function submitAssignment(assignmentId) {
+            const assignment = assignmentsCache.find(a => a._id === assignmentId);
             if (!assignment) return;
-            
+
             const answer = prompt(`Submit your work for: ${assignment.title}\n\nEnter your answer:`);
             if (!answer) return;
-            
-            const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-            submissions.push({
-                id: Date.now(),
-                assignmentId,
-                studentId: user.id,
-                answer,
-                submittedAt: new Date().toISOString(),
-                status: 'submitted'
-            });
-            
-            localStorage.setItem('submissions', JSON.stringify(submissions));
-            alert('Assignment submitted successfully!');
-            location.reload();
+
+            try {
+                await Data.submissions.submit({
+                    assignmentId,
+                    content: answer
+                });
+                alert('Assignment submitted successfully!');
+                location.reload();
+            } catch (error) {
+                alert('Failed to submit assignment: ' + error.message);
+            }
         }
-        
+
         function viewSubmission(assignmentId) {
-            const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-            const submission = JSON.parse(localStorage.getItem('submissions') || '[]')
-                .find(s => s.assignmentId === assignmentId && s.studentId === user.id);
-            
+            const submission = mySubmissionsCache.find(s => (s.assignmentId?._id || s.assignmentId) === assignmentId);
+
             if (submission) {
-                alert(`Your submission:\n\n${submission.answer}\n\nStatus: ${submission.status}\n${submission.grade ? `Grade: ${submission.grade}` : 'Not graded yet'}`);
+                alert(`Your submission:\n\n${submission.content}\n\nStatus: ${submission.status}\n${submission.grade != null ? `Grade: ${submission.grade}` : 'Not graded yet'}${submission.comments ? `\nComments: ${submission.comments}` : ''}`);
             }
         }
     </script>

@@ -13,7 +13,7 @@
         <div class="container">
             <div class="nav-brand">
                 <a href="teacher-dashboard.html">
-                    <img src="logo..png" alt="SSPLP Logo" class="logo">
+                    <img src="logo.svg" alt="SSPLP Logo" class="logo">
                     <span>SSPLP</span>
                 </a>
             </div>
@@ -84,26 +84,50 @@
         </div>
     </div>
 
-    <script src="js/universal.js"></script>
-    <script src="js/teacher-features.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
+    <script src="js/core/universal.js"></script>
+    <script src="js/teacher/teacher-features.js"></script>
+    <script src="js/core/app.js"></script>
     <script>
         let currentSubmissionId = null;
+        let submissionsCache = [];
 
-        function loadSubmissions() {
-            const submissions = TeacherFeatures.getSubmissions();
-            const pending = submissions.filter(s => s.status !== 'graded');
-            
+        async function fetchAllSubmissions() {
+            const assignments = await TeacherFeatures.getAssignments();
+            const lists = await Promise.all(assignments.map(async assignment => {
+                try {
+                    const subs = await TeacherFeatures.getSubmissions(assignment._id);
+                    return subs.map(s => ({ ...s, assignmentTitle: assignment.title }));
+                } catch (error) {
+                    console.warn('Failed to load submissions for assignment', assignment._id, error);
+                    return [];
+                }
+            }));
+            return lists.flat();
+        }
+
+        async function loadSubmissions() {
             const tbody = document.getElementById('submissionsTable');
+            try {
+                submissionsCache = await fetchAllSubmissions();
+            } catch (error) {
+                console.error('Failed to load submissions', error);
+                tbody.innerHTML = '<tr><td colspan="6">Failed to load submissions</td></tr>';
+                return;
+            }
+
+            const pending = submissionsCache.filter(s => s.status !== 'graded');
+
             tbody.innerHTML = pending.length ? pending.map(s => `
                 <tr>
-                    <td><input type="checkbox" class="submission-checkbox" value="${s.id}"></td>
-                    <td>${s.studentName || 'Student ' + s.studentId}</td>
-                    <td>${s.assignmentTitle || 'Assignment ' + s.assignmentId}</td>
+                    <td><input type="checkbox" class="submission-checkbox" value="${s._id}"></td>
+                    <td>${s.studentId?.name || 'Unknown student'}</td>
+                    <td>${s.assignmentTitle || 'Assignment'}</td>
                     <td>${new Date(s.submittedAt).toLocaleDateString()}</td>
                     <td><span class="badge badge-warning">${s.status}</span></td>
                     <td>
-                        <button class="btn-icon" onclick="openGradingModal(${s.id})">
+                        <button class="btn-icon" onclick="openGradingModal('${s._id}')">
                             <i class="fas fa-edit"></i>
                         </button>
                     </td>
@@ -119,10 +143,10 @@
 
         document.getElementById('selectAllCheckbox').addEventListener('change', selectAll);
 
-        function bulkGrade() {
+        async function bulkGrade() {
             const selected = Array.from(document.querySelectorAll('.submission-checkbox:checked'))
-                .map(cb => parseInt(cb.value));
-            
+                .map(cb => cb.value);
+
             if (!selected.length) {
                 Universal.showToast('No submissions selected', 'warning');
                 return;
@@ -130,26 +154,27 @@
 
             const grade = prompt('Enter grade for all selected (0-100):');
             if (grade && grade >= 0 && grade <= 100) {
-                TeacherFeatures.bulkGrade(selected, parseInt(grade));
-                loadSubmissions();
+                await TeacherFeatures.bulkGrade(selected, parseInt(grade));
+                await loadSubmissions();
             }
         }
 
         function openGradingModal(submissionId) {
             currentSubmissionId = submissionId;
-            const submissions = TeacherFeatures.getSubmissions();
-            const submission = submissions.find(s => s.id == submissionId);
-            
+            const submission = submissionsCache.find(s => s._id === submissionId);
+            if (!submission) return;
+
             document.getElementById('submissionContent').innerHTML = `
-                <p><strong>Student:</strong> ${submission.studentName || 'Student ' + submission.studentId}</p>
-                <p><strong>Assignment:</strong> ${submission.assignmentTitle || 'Assignment ' + submission.assignmentId}</p>
+                <p><strong>Student:</strong> ${submission.studentId?.name || 'Unknown student'}</p>
+                <p><strong>Assignment:</strong> ${submission.assignmentTitle || 'Assignment'}</p>
                 <p><strong>Submitted:</strong> ${new Date(submission.submittedAt).toLocaleString()}</p>
                 <div class="submission-answer">
                     <strong>Answer:</strong>
-                    <p>${submission.answer || 'No answer provided'}</p>
+                    <p>${submission.content || 'No answer provided'}</p>
+                    ${submission.fileUrl ? `<p><a href="${submission.fileUrl}" target="_blank">View attached link</a></p>` : ''}
                 </div>
             `;
-            
+
             document.getElementById('gradingModal').style.display = 'flex';
         }
 
@@ -158,18 +183,22 @@
             currentSubmissionId = null;
         }
 
-        function submitGrade() {
+        async function submitGrade() {
             const grade = parseInt(document.getElementById('gradeInput').value);
             const comments = document.getElementById('commentsInput').value;
-            
+
             if (grade < 0 || grade > 100) {
                 Universal.showToast('Grade must be between 0 and 100', 'error');
                 return;
             }
 
-            TeacherFeatures.gradeSubmission(currentSubmissionId, grade, comments);
-            closeGradingModal();
-            loadSubmissions();
+            try {
+                await TeacherFeatures.gradeSubmission(currentSubmissionId, grade, comments);
+                closeGradingModal();
+                await loadSubmissions();
+            } catch (error) {
+                Universal.showToast('Failed to submit grade: ' + error.message, 'error');
+            }
         }
 
         document.addEventListener('DOMContentLoaded', loadSubmissions);

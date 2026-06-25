@@ -174,18 +174,22 @@
     </section>
 
     <script src="js/core/i18n.js"></script>
-    <script src="js/seed-data.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script src="js/core/app.js"></script>
     <script>
+        let allUsersCache = [];
+
         // Load students
-        function loadStudents() {
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
+        async function loadStudents() {
+            const users = await Data.users.list();
+            allUsersCache = users;
             const students = users.filter(u => u.role === 'student');
-            
+
             const container = document.getElementById('studentList');
             container.innerHTML = students.map(s => `
                 <label class="student-checkbox">
-                    <input type="checkbox" class="student-check" value="${s.id}" data-name="${s.name}">
+                    <input type="checkbox" class="student-check" value="${s._id}" data-name="${s.name}" data-email="${s.email}">
                     <div class="student-info">
                         <span class="student-name">${s.name}</span>
                         <span class="student-grade">Grade ${s.grade || 'N/A'}</span>
@@ -216,11 +220,11 @@
         });
 
         // Schedule meeting
-        document.getElementById('scheduleMeetingForm').addEventListener('submit', function(e) {
+        document.getElementById('scheduleMeetingForm').addEventListener('submit', async function(e) {
             e.preventDefault();
 
             const selectedStudents = Array.from(document.querySelectorAll('.student-check:checked'))
-                .map(cb => ({ id: cb.value, name: cb.dataset.name }));
+                .map(cb => ({ id: cb.value, name: cb.dataset.name, email: cb.dataset.email }));
 
             if (selectedStudents.length === 0) {
                 alert('Please select at least one student');
@@ -228,62 +232,46 @@
             }
 
             const teacher = JSON.parse(localStorage.getItem('currentUser') || '{}');
-            const meeting = {
-                id: Date.now(),
-                teacherId: teacher.id,
-                teacherName: teacher.name,
-                title: document.getElementById('meetingTitle').value,
-                subject: document.getElementById('meetingSubject').value,
-                datetime: document.getElementById('meetingDateTime').value,
-                duration: document.getElementById('meetingDuration').value,
-                type: document.getElementById('meetingType').value,
-                description: document.getElementById('meetingDescription').value,
-                students: selectedStudents,
-                meetLink: 'https://meet.google.com/zce-wnss-vvr',
-                status: 'scheduled',
-                createdAt: new Date().toISOString()
-            };
+            const title = document.getElementById('meetingTitle').value;
+            const subject = document.getElementById('meetingSubject').value;
+            const datetime = new Date(document.getElementById('meetingDateTime').value).toISOString();
+            const duration = Number(document.getElementById('meetingDuration').value);
+            const type = document.getElementById('meetingType').value === 'group' ? 'Group' : 'Individual';
+            const description = document.getElementById('meetingDescription').value;
+            const meetLink = 'https://meet.google.com/zce-wnss-vvr';
 
-            // Save meeting
-            let meetings = JSON.parse(localStorage.getItem('scheduledMeetings') || '[]');
-            meetings.push(meeting);
-            localStorage.setItem('scheduledMeetings', JSON.stringify(meetings));
-
-            // Create bookings for each student
-            let bookings = JSON.parse(localStorage.getItem('bookings') || '[]');
-            const allUsers = JSON.parse(localStorage.getItem('users') || '[]');
-            selectedStudents.forEach(student => {
-                const studentUser = allUsers.find(u => u.id == student.id);
-                bookings.push({
-                    id: Date.now() + Math.random(),
-                    studentId: student.id,
-                    studentName: student.name,
-                    studentEmail: studentUser ? studentUser.email : '',
+            try {
+                // Meeting model supports one student per record - create one per selected student
+                await Promise.all(selectedStudents.map(student => Data.meetings.create({
                     teacherId: teacher.id,
                     teacherName: teacher.name,
-                    subject: meeting.subject,
-                    datetime: meeting.datetime,
-                    type: meeting.type,
-                    meetLink: meeting.meetLink,
-                    status: 'scheduled',
-                    title: meeting.title,
-                    description: meeting.description
-                });
-            });
-            localStorage.setItem('bookings', JSON.stringify(bookings));
-            console.log('Bookings created:', bookings);
+                    studentId: student.id,
+                    studentEmail: student.email,
+                    title,
+                    subject,
+                    type,
+                    datetime,
+                    duration,
+                    meetLink,
+                    description
+                })));
 
-            alert(`Meeting scheduled successfully with ${selectedStudents.length} student(s)!`);
-            this.reset();
-            loadStudents();
-            loadScheduledMeetings();
+                alert(`Meeting scheduled successfully with ${selectedStudents.length} student(s)!`);
+                this.reset();
+                loadStudents();
+                loadScheduledMeetings();
+            } catch (error) {
+                console.error('Failed to schedule meeting:', error);
+                alert('Failed to schedule meeting: ' + error.message);
+            }
         });
 
         // Load scheduled meetings
-        function loadScheduledMeetings() {
+        async function loadScheduledMeetings() {
             const teacher = JSON.parse(localStorage.getItem('currentUser') || '{}');
-            const meetings = JSON.parse(localStorage.getItem('scheduledMeetings') || '[]')
-                .filter(m => m.teacherId === teacher.id)
+            const allMeetings = await Data.meetings.list();
+            const meetings = allMeetings
+                .filter(m => (m.teacherId?._id || m.teacherId) === teacher.id)
                 .sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
 
             const container = document.getElementById('scheduledMeetings');
@@ -294,14 +282,14 @@
                             <h3 style="margin: 0 0 5px 0;">${m.title}</h3>
                             <p style="color: #6b7280; margin: 5px 0;"><i class="fas fa-book"></i> ${m.subject}</p>
                             <p style="color: #6b7280; margin: 5px 0;"><i class="fas fa-clock"></i> ${new Date(m.datetime).toLocaleString()}</p>
-                            <p style="color: #6b7280; margin: 5px 0;"><i class="fas fa-users"></i> ${m.students.length} student(s): ${m.students.map(s => s.name).join(', ')}</p>
+                            <p style="color: #6b7280; margin: 5px 0;"><i class="fas fa-users"></i> ${m.studentEmail || 'Student'}</p>
                             ${m.description ? `<p style="margin: 10px 0 0 0;">${m.description}</p>` : ''}
                         </div>
                         <div>
                             <a href="${m.meetLink}" target="_blank" class="btn btn-primary" style="white-space: nowrap;">
                                 <i class="fas fa-video"></i> Join
                             </a>
-                            <button onclick="cancelMeeting(${m.id})" class="btn btn-secondary" style="margin-top: 5px;">
+                            <button onclick="cancelMeeting('${m._id}')" class="btn btn-secondary" style="margin-top: 5px;">
                                 <i class="fas fa-times"></i> Cancel
                             </button>
                         </div>
@@ -311,15 +299,17 @@
         }
 
         // Cancel meeting
-        function cancelMeeting(meetingId) {
+        async function cancelMeeting(meetingId) {
             if (!confirm('Cancel this meeting?')) return;
 
-            let meetings = JSON.parse(localStorage.getItem('scheduledMeetings') || '[]');
-            meetings = meetings.filter(m => m.id !== meetingId);
-            localStorage.setItem('scheduledMeetings', JSON.stringify(meetings));
-
-            loadScheduledMeetings();
-            alert('Meeting cancelled');
+            try {
+                await Data.meetings.remove(meetingId);
+                loadScheduledMeetings();
+                alert('Meeting cancelled');
+            } catch (error) {
+                console.error('Failed to cancel meeting:', error);
+                alert('Failed to cancel meeting: ' + error.message);
+            }
         }
 
         document.addEventListener('DOMContentLoaded', () => {

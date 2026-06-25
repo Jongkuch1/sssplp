@@ -1,22 +1,32 @@
 // Admin Dashboard Features - FR01, FR07, FR09, FR10, FR13, FR14
+// Backed by the real API via window.Data; all methods that touch shared
+// data are now async and must be awaited by callers.
 const AdminFeatures = {
     // FR13: System Health & Usage Overview
-    getSystemHealth() {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const logs = JSON.parse(localStorage.getItem('activityLogs') || '[]');
-        const resources = JSON.parse(localStorage.getItem('resources') || '[]');
-        
-        const now = Date.now();
-        const dayAgo = now - 86400000;
-        const activeUsers = new Set(logs.filter(l => l.timestamp > dayAgo).map(l => l.user)).size;
-        
+    async getSystemHealth() {
+        const dayAgo = Date.now() - 86400000;
+        const [users, pendingCourses, pendingQuizzes, pendingAssignments] = await Promise.all([
+            Data.users.list(),
+            Data.courses.list({ status: 'pending' }),
+            Data.quizzes.list({ status: 'pending' }),
+            Data.assignments.list({ status: 'pending' })
+        ]);
+
+        let activeUsers = 0;
+        try {
+            const logs = await Data.auditLogs.list({ startDate: String(dayAgo) });
+            activeUsers = new Set(logs.map(l => l.userEmail)).size;
+        } catch (error) {
+            activeUsers = 0;
+        }
+
         return {
             totalUsers: users.length,
             activeUsers,
             uptime: 99.9,
             responseTime: Math.random() * 100 + 50,
             storageUsed: this.calculateStorage(),
-            pendingApprovals: resources.filter(r => r.status === 'pending_approval').length
+            pendingApprovals: pendingCourses.length + pendingQuizzes.length + pendingAssignments.length
         };
     },
 
@@ -31,69 +41,62 @@ const AdminFeatures = {
     },
 
     // FR01: User Management
-    createUser(userData) {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const user = {
-            id: Date.now(),
-            ...userData,
-            createdAt: Date.now(),
-            status: 'active'
-        };
-        users.push(user);
-        localStorage.setItem('users', JSON.stringify(users));
-        this.logAudit('user_created', { userId: user.id, email: user.email });
+    async createUser(userData) {
+        const user = await Data.users.create(userData);
+        this.logAudit('user_created', { userId: user._id, email: user.email });
         Universal.showToast('User created', 'success');
         return user;
     },
 
-    updateUser(userId, updates) {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const index = users.findIndex(u => u.id == userId || u.email == userId);
-        if (index !== -1) {
-            users[index] = { ...users[index], ...updates, updatedAt: Date.now() };
-            localStorage.setItem('users', JSON.stringify(users));
-            this.logAudit('user_updated', { userId, updates });
-            Universal.showToast('User updated', 'success');
-        }
+    async updateUser(userId, updates) {
+        const user = await Data.users.update(userId, updates);
+        this.logAudit('user_updated', { userId, updates });
+        Universal.showToast('User updated', 'success');
+        return user;
     },
 
-    deactivateUser(userId) {
-        this.updateUser(userId, { status: 'inactive' });
+    async deactivateUser(userId) {
+        await this.updateUser(userId, { status: 'inactive' });
         this.logAudit('user_deactivated', { userId });
     },
 
-    bulkImportUsers(csvData) {
+    async bulkImportUsers(csvData) {
         const lines = csvData.split('\n').slice(1);
         let imported = 0;
-        
-        lines.forEach(line => {
+
+        for (const line of lines) {
             const [name, email, role, grade] = line.split(',');
             if (email && role) {
-                this.createUser({ name, email, role, grade });
-                imported++;
+                try {
+                    await this.createUser({ name, email, role, grade });
+                    imported++;
+                } catch (error) {
+                    console.warn(`Failed to import ${email}:`, error.message);
+                }
             }
-        });
-        
+        }
+
         Universal.showToast(`${imported} users imported`, 'success');
         return imported;
     },
 
-    exportUsers() {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const csv = 'Name,Email,Role,Grade,Status\n' + 
-            users.map(u => `${u.name},${u.email},${u.role},${u.grade || ''},${u.status}`).join('\n');
-        
+    async exportUsers() {
+        const users = await Data.users.list();
+        const csv = 'Name,Email,Role,Grade,Status\n' +
+            users.map(u => `${u.name},${u.email},${u.role},${u.grade || ''},${u.status || 'active'}`).join('\n');
+
         const blob = new Blob([csv], { type: 'text/csv' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
         a.download = `users_${Date.now()}.csv`;
         a.click();
-        
+
         this.logAudit('users_exported', { count: users.length });
     },
 
-    // FR10: Content Approval
+    // FR10: Content Approval — generic file/resource library has no backend model yet
+    // (only courses/quizzes/assignments have a real approval workflow, handled separately).
     getPendingContent() {
         const resources = JSON.parse(localStorage.getItem('resources') || '[]');
         return resources.filter(r => r.status === 'pending_approval');
@@ -124,8 +127,8 @@ const AdminFeatures = {
     },
 
     // FR07: Reports Generator
-    generateReport(type, period) {
-        const data = this.getReportData(type, period);
+    async generateReport(type, period) {
+        const data = await this.getReportData(type, period);
         const report = {
             id: Date.now(),
             type,
@@ -133,30 +136,39 @@ const AdminFeatures = {
             generatedAt: Date.now(),
             data
         };
-        
+
         const reports = JSON.parse(localStorage.getItem('reports') || '[]');
         reports.push(report);
         localStorage.setItem('reports', JSON.stringify(reports));
-        
+
         this.logAudit('report_generated', { type, period });
         return report;
     },
 
-    getReportData(type, period) {
-        const users = JSON.parse(localStorage.getItem('users') || '[]');
-        const attempts = JSON.parse(localStorage.getItem('quizAttempts') || '[]');
-        const logs = JSON.parse(localStorage.getItem('activityLogs') || '[]');
-        
-        const now = Date.now();
+    async getReportData(type, period) {
         const periodMs = period === 'monthly' ? 30 * 86400000 : 90 * 86400000;
-        const startDate = now - periodMs;
-        
+        const startDate = Date.now() - periodMs;
+
+        const [users, attempts] = await Promise.all([
+            Data.users.list(),
+            Data.learning.getQuizAttempts({ all: 'true' })
+        ]);
+        const periodAttempts = attempts.filter(a => new Date(a.createdAt).getTime() > startDate);
+
+        let activeUsers = 0;
+        try {
+            const logs = await Data.auditLogs.list({ startDate: String(startDate) });
+            activeUsers = new Set(logs.map(l => l.userEmail)).size;
+        } catch (error) {
+            activeUsers = 0;
+        }
+
         return {
             totalUsers: users.length,
-            activeUsers: new Set(logs.filter(l => l.timestamp > startDate).map(l => l.user)).size,
-            quizAttempts: attempts.filter(a => a.timestamp > startDate).length,
-            avgScore: this.calculateAverage(attempts.filter(a => a.timestamp > startDate)),
-            period: `${new Date(startDate).toLocaleDateString()} - ${new Date(now).toLocaleDateString()}`
+            activeUsers,
+            quizAttempts: periodAttempts.length,
+            avgScore: this.calculateAverage(periodAttempts),
+            period: `${new Date(startDate).toLocaleDateString()} - ${new Date().toLocaleDateString()}`
         };
     },
 
@@ -169,7 +181,7 @@ const AdminFeatures = {
         const reports = JSON.parse(localStorage.getItem('reports') || '[]');
         const report = reports.find(r => r.id == reportId);
         if (!report) return;
-        
+
         const content = `
 SSPLP ${report.type.toUpperCase()} REPORT
 Generated: ${new Date(report.generatedAt).toLocaleString()}
@@ -182,7 +194,7 @@ Active Users: ${report.data.activeUsers}
 Quiz Attempts: ${report.data.quizAttempts}
 Average Score: ${report.data.avgScore}%
         `;
-        
+
         const blob = new Blob([content], { type: 'text/plain' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
@@ -191,7 +203,7 @@ Average Score: ${report.data.avgScore}%
         a.click();
     },
 
-    // FR09 & FR14: System Settings
+    // FR09 & FR14: System Settings — single-admin local preference, no backend model.
     getSettings() {
         return JSON.parse(localStorage.getItem('systemSettings') || JSON.stringify({
             smsProvider: 'twilio',
@@ -210,51 +222,33 @@ Average Score: ${report.data.avgScore}%
     },
 
     // FR14: Security & Audit Logs
-    logAudit(action, details) {
-        const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
-        const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-        
-        logs.push({
-            id: Date.now(),
-            action,
-            details,
-            user: user.email,
-            timestamp: Date.now(),
-            ip: '127.0.0.1'
-        });
-        
-        localStorage.setItem('auditLogs', JSON.stringify(logs.slice(-1000)));
+    async logAudit(action, details) {
+        try {
+            await Data.auditLogs.log({ action, details });
+        } catch (error) {
+            console.warn('Failed to record audit log:', error.message);
+        }
     },
 
-    getAuditLogs(filters = {}) {
-        let logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
-        
-        if (filters.action) {
-            logs = logs.filter(l => l.action === filters.action);
-        }
-        if (filters.user) {
-            logs = logs.filter(l => l.user === filters.user);
-        }
-        if (filters.startDate) {
-            logs = logs.filter(l => l.timestamp >= filters.startDate);
-        }
-        
-        return logs.sort((a, b) => b.timestamp - a.timestamp);
+    async getAuditLogs(filters = {}) {
+        const query = {};
+        if (filters.action) query.action = filters.action;
+        if (filters.user) query.user = filters.user;
+        if (filters.startDate) query.startDate = String(filters.startDate);
+        return await Data.auditLogs.list(query);
     },
 
-    detectSuspiciousActivity() {
-        const logs = JSON.parse(localStorage.getItem('auditLogs') || '[]');
-        const recentLogs = logs.filter(l => l.timestamp > Date.now() - 3600000);
-        
+    async detectSuspiciousActivity() {
+        const logs = await this.getAuditLogs({ startDate: Date.now() - 3600000 });
+
         const suspicious = [];
-        const failedLogins = recentLogs.filter(l => l.action === 'login_failed');
-        
-        // Multiple failed logins
+        const failedLogins = logs.filter(l => l.action === 'login_failed');
+
         const loginsByUser = {};
         failedLogins.forEach(l => {
-            loginsByUser[l.user] = (loginsByUser[l.user] || 0) + 1;
+            loginsByUser[l.userEmail] = (loginsByUser[l.userEmail] || 0) + 1;
         });
-        
+
         Object.entries(loginsByUser).forEach(([user, count]) => {
             if (count >= 3) {
                 suspicious.push({
@@ -265,15 +259,15 @@ Average Score: ${report.data.avgScore}%
                 });
             }
         });
-        
+
         return suspicious;
     },
 
-    // NFR04 & NFR06: Performance Monitoring
+    // NFR04 & NFR06: Performance Monitoring (decorative — no real APM backend)
     getPerformanceMetrics() {
         const logs = JSON.parse(localStorage.getItem('activityLogs') || '[]');
         const recentLogs = logs.filter(l => l.timestamp > Date.now() - 3600000);
-        
+
         return {
             requestsPerHour: recentLogs.length,
             avgResponseTime: Math.random() * 100 + 50,
@@ -291,17 +285,17 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 });
 
-function loadAdminDashboard() {
-    const health = AdminFeatures.getSystemHealth();
+async function loadAdminDashboard() {
+    const health = await AdminFeatures.getSystemHealth();
     const metrics = AdminFeatures.getPerformanceMetrics();
-    
+
     document.getElementById('totalUsers').textContent = health.totalUsers;
     document.getElementById('activeUsers').textContent = health.activeUsers;
     document.getElementById('systemUptime').textContent = health.uptime + '%';
     document.getElementById('pendingApprovals').textContent = health.pendingApprovals;
-    
+
     // Suspicious activity
-    const suspicious = AdminFeatures.detectSuspiciousActivity();
+    const suspicious = await AdminFeatures.detectSuspiciousActivity();
     const alertsContainer = document.getElementById('securityAlerts');
     if (alertsContainer) {
         alertsContainer.innerHTML = suspicious.length ? suspicious.map(s => `

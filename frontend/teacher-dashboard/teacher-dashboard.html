@@ -140,6 +140,7 @@
     </section>
 
     <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script src="js/data-sync.js"></script>
     <script src="js/core/i18n.js"></script>
     <script src="js/seed-data.js"></script>
@@ -147,12 +148,15 @@
     <script src="js/teacher/teacher-features.js"></script>
     <script src="js/core/app.js"></script>
     <script>
-        // Load dashboard data
-        document.addEventListener('DOMContentLoaded', () => {
+        // Profile name/pic and the content-summary widgets that loadTeacherDashboard()
+        // (in js/teacher/teacher-features.js) doesn't cover. The stats it DOES cover
+        // (totalStudents, activeStudents, avgClassScore, totalCourses, upcomingSessions)
+        // are intentionally not duplicated here anymore.
+        document.addEventListener('DOMContentLoaded', async () => {
             const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
             const userName = user.name || translateRole('teacher');
             document.getElementById('teacherName').textContent = userName;
-            
+
             // Load profile picture with initials or uploaded image
             const profilePic = document.getElementById('navProfilePic');
             if (user.profilePic) {
@@ -161,104 +165,47 @@
                 const initials = user.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
                 profilePic.textContent = initials;
             }
-            
-            // Calculate real statistics
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
-            const students = users.filter(u => u.role === 'student');
-            const courses = JSON.parse(localStorage.getItem('courses') || '[]');
-            const teacherCourses = courses.filter(c => c.teacherId === user.id);
-            const quizAttempts = JSON.parse(localStorage.getItem('quizAttempts') || '[]');
-            
-            // Total students
-            document.getElementById('totalStudents').textContent = students.length;
-            
-            // Active students (students with activity in last 30 days)
-            const thirtyDaysAgo = new Date();
-            thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-            const activeStudents = students.filter(s => {
-                const lastActive = s.lastActive ? new Date(s.lastActive) : new Date(s.createdAt || Date.now());
-                return lastActive > thirtyDaysAgo;
-            });
-            document.getElementById('activeStudents').textContent = activeStudents.length;
-            
-            // Class average from quiz attempts
-            if (quizAttempts.length > 0) {
-                const totalScore = quizAttempts.reduce((sum, attempt) => sum + (attempt.score || 0), 0);
-                const avgScore = Math.round(totalScore / quizAttempts.length);
-                document.getElementById('avgClassScore').textContent = avgScore + '%';
-            } else {
-                document.getElementById('avgClassScore').textContent = 'N/A';
-            }
-            
-            // Total courses
-            document.getElementById('totalCourses').textContent = teacherCourses.length;
-            
-            // Load upcoming sessions
-            const bookings = JSON.parse(localStorage.getItem('bookings') || '[]')
-                .filter(b => b.teacherId === user.id && new Date(b.datetime) > new Date())
-                .sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
-            
-            const sessionsContainer = document.getElementById('upcomingSessions');
-            const noSessionsText = t('noUpcomingSessions');
-            const scheduleText = t('scheduleMeeting');
-            const joinText = t('join');
-            
-            sessionsContainer.innerHTML = bookings.length ? bookings.map(s => {
-                const student = users.find(u => u.id === s.studentId);
-                return `
-                    <div class="session-card" style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; margin-bottom: 10px;">
-                        <div style="display: flex; justify-content: space-between; align-items: start;">
-                            <div>
-                                <h3 style="margin: 0 0 5px 0;">${s.title || s.type + ' session'}</h3>
-                                <p style="color: #6b7280; margin: 5px 0;"><i class="fas fa-user"></i> ${student ? student.name : 'Student'}</p>
-                                <p style="color: #6b7280; margin: 5px 0;"><i class="fas fa-clock"></i> ${new Date(s.datetime).toLocaleString()}</p>
-                                <p style="color: #6b7280; margin: 5px 0;"><i class="fas fa-users"></i> ${s.type}</p>
-                            </div>
-                            <a href="${s.meetLink}" target="_blank" class="btn btn-primary" style="white-space: nowrap;">
-                                <i class="fas fa-video"></i> ${joinText}
-                            </a>
-                        </div>
-                    </div>
-                `;
-            }).join('') : `<p>${noSessionsText} <a href="teacher-schedule-meeting.html">${scheduleText}</a></p>`;
-            
-            // Load pending grading
-            const submissions = TeacherFeatures.getSubmissions();
-            const pending = submissions.filter(s => s.status !== 'graded');
-            
+
+            // Load pending grading across the teacher's own assignments
             const gradingContainer = document.getElementById('pendingGrading');
             const noPendingText = t('noPendingSubmissions');
-            
-            gradingContainer.innerHTML = pending.length ? pending.slice(0, 5).map(s => {
-                const student = users.find(u => u.id === s.studentId);
-                return `
+            try {
+                const assignments = await Data.assignments.list({ mine: 'true' });
+                const submissionLists = await Promise.all(assignments.map(a => Data.submissions.getForAssignment(a._id)));
+                const pending = submissionLists.flat().filter(s => s.status !== 'graded');
+
+                gradingContainer.innerHTML = pending.length ? pending.slice(0, 5).map(s => `
                     <div class="grading-item" style="display: flex; justify-content: space-between; align-items: center; padding: 15px; border: 1px solid #e5e7eb; border-radius: 8px; margin-bottom: 10px;">
-                        <span>${student ? student.name : 'Student'} - Assignment ${s.assignmentId}</span>
+                        <span>${s.studentId?.name || 'Student'} - ${s.assignmentId?.title || 'Assignment'}</span>
                         <a href="grading-queue.html" class="btn btn-primary btn-sm">Grade</a>
                     </div>
+                `).join('') : `<p>${noPendingText}</p>`;
+
+                // Load teacher content summary
+                const myContentContainer = document.getElementById('myContent');
+                const courses = await Data.courses.list({ mine: 'true' });
+                const resources = JSON.parse(localStorage.getItem('resources') || '[]').filter(r => r.teacherId === user.id);
+                const meetings = await Data.meetings.list();
+                const myUpcoming = meetings.filter(m => (m.teacherId?._id || m.teacherId) === user.id && new Date(m.datetime) > new Date());
+
+                myContentContainer.innerHTML = `
+                    <div class="info-item">
+                        <strong>${courses.length}</strong> <span data-i18n="courses">Courses</span>
+                    </div>
+                    <div class="info-item">
+                        <strong>${assignments.length}</strong> <span data-i18n="assignments">Assignments</span>
+                    </div>
+                    <div class="info-item">
+                        <strong>${resources.length}</strong> <span data-i18n="resources">Resources</span>
+                    </div>
+                    <div class="info-item">
+                        <strong>${myUpcoming.length}</strong> <span data-i18n="upcomingSessions">Upcoming Sessions</span>
+                    </div>
                 `;
-            }).join('') : `<p>${noPendingText}</p>`;
-            
-            // Load teacher content summary
-            const myContentContainer = document.getElementById('myContent');
-            const assignments = JSON.parse(localStorage.getItem('assignments') || '[]').filter(a => a.teacherId === user.id);
-            const resources = JSON.parse(localStorage.getItem('resources') || '[]').filter(r => r.teacherId === user.id);
-            
-            myContentContainer.innerHTML = `
-                <div class="info-item">
-                    <strong>${teacherCourses.length}</strong> <span data-i18n="courses">Courses</span>
-                </div>
-                <div class="info-item">
-                    <strong>${assignments.length}</strong> <span data-i18n="assignments">Assignments</span>
-                </div>
-                <div class="info-item">
-                    <strong>${resources.length}</strong> <span data-i18n="resources">Resources</span>
-                </div>
-                <div class="info-item">
-                    <strong>${bookings.length}</strong> <span data-i18n="upcomingSessions">Upcoming Sessions</span>
-                </div>
-            `;
-            
+            } catch (error) {
+                console.warn('Could not load teacher content summary', error.message);
+            }
+
             // Re-translate page after dynamic content is loaded
             translatePage();
         });

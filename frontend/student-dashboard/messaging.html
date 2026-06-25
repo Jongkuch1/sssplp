@@ -73,20 +73,35 @@
     <script src="js/core/app.js"></script>
     <script src="js/seed-data.js"></script>
     <script src="js/load-profile.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script>
         let currentConversation = null;
+        let currentConversationName = null;
+        let teachersCache = [];
         const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-        
-        function loadTeachers() {
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
+
+        async function loadTeachers() {
+            const users = await Data.users.list();
             const teachers = users.filter(u => u.role === 'teacher');
-            const messages = JSON.parse(localStorage.getItem('messages') || '[]');
-            
+            teachersCache = teachers;
+
+            // Compute unread counts per teacher by checking each conversation
+            const unreadCounts = {};
+            await Promise.all(teachers.map(async (teacher) => {
+                try {
+                    const conversation = await Data.messages.getConversation(currentUser.id, teacher._id);
+                    unreadCounts[teacher._id] = conversation.filter(m => m.from === teacher._id && m.to === currentUser.id && !m.read).length;
+                } catch (e) {
+                    unreadCounts[teacher._id] = 0;
+                }
+            }));
+
             const teacherList = document.getElementById('teacherList');
             teacherList.innerHTML = teachers.map(teacher => {
-                const unread = messages.filter(m => m.from === teacher.id && m.to === currentUser.id && !m.read).length;
+                const unread = unreadCounts[teacher._id] || 0;
                 return `
-                    <div onclick="openConversation(${teacher.id}, '${teacher.name}')" style="padding: 15px; border-bottom: 1px solid #e5e7eb; cursor: pointer;">
+                    <div onclick="openConversation('${teacher._id}', '${teacher.name}')" style="padding: 15px; border-bottom: 1px solid #e5e7eb; cursor: pointer;">
                         <strong>${teacher.name}</strong>
                         ${unread > 0 ? `<span style="background: #ef4444; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 10px;">${unread}</span>` : ''}
                         <p style="color: #6b7280; font-size: 14px; margin: 5px 0 0 0;">${teacher.email}</p>
@@ -94,26 +109,22 @@
                 `;
             }).join('') || '<p style="padding: 15px;">No teachers available</p>';
         }
-        
-        function openConversation(teacherId, teacherName) {
+
+        async function openConversation(teacherId, teacherName) {
             currentConversation = teacherId;
+            currentConversationName = teacherName;
             document.getElementById('chatTitle').textContent = teacherName;
             document.getElementById('messageInput').style.display = 'block';
-            loadMessages();
+            await loadMessages();
         }
-        
-        function loadMessages() {
-            const messages = JSON.parse(localStorage.getItem('messages') || '[]');
-            const conversation = messages.filter(m => 
-                (m.from === currentUser.id && m.to === currentConversation) ||
-                (m.from === currentConversation && m.to === currentUser.id)
-            ).sort((a, b) => a.timestamp - b.timestamp);
-            
-            messages.forEach(m => {
-                if (m.from === currentConversation && m.to === currentUser.id) m.read = true;
-            });
-            localStorage.setItem('messages', JSON.stringify(messages));
-            
+
+        async function loadMessages() {
+            const conversation = await Data.messages.getConversation(currentUser.id, currentConversation);
+
+            // Mark unread messages from this contact as read
+            const unreadFromContact = conversation.filter(m => m.from === currentConversation && m.to === currentUser.id && !m.read);
+            await Promise.all(unreadFromContact.map(m => Data.messages.markRead(m._id)));
+
             const messageArea = document.getElementById('messageArea');
             messageArea.innerHTML = conversation.map(m => {
                 const isMe = m.from === currentUser.id;
@@ -127,32 +138,36 @@
                 `;
             }).join('') || '<p style="text-align: center; color: #6b7280;">No messages yet. Start the conversation!</p>';
             messageArea.scrollTop = messageArea.scrollHeight;
-            loadTeachers();
+            await loadTeachers();
         }
-        
-        function sendMessage() {
+
+        async function sendMessage() {
             const input = document.getElementById('newMessage');
             const text = input.value.trim();
             if (!text || !currentConversation) return;
-            
-            const messages = JSON.parse(localStorage.getItem('messages') || '[]');
-            messages.push({
-                id: Date.now(),
+
+            await Data.messages.send({
                 from: currentUser.id,
                 to: currentConversation,
-                text: text,
-                timestamp: Date.now(),
-                read: false
+                text: text
             });
-            localStorage.setItem('messages', JSON.stringify(messages));
+
+            await Data.notifications.send({
+                userId: currentConversation,
+                type: 'message',
+                message: `New message from ${currentUser.name}`,
+                channel: 'in-app',
+                link: 'messaging.html'
+            });
+
             input.value = '';
-            loadMessages();
+            await loadMessages();
         }
-        
+
         document.getElementById('newMessage')?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendMessage();
         });
-        
+
         document.addEventListener('DOMContentLoaded', () => {
             translatePage();
             loadTeachers();

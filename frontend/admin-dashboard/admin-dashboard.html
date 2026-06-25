@@ -145,6 +145,7 @@
     </section>
 
     <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script src="js/data-sync.js"></script>
     <script src="js/core/i18n.js"></script>
     <script src="js/seed-data.js"></script>
@@ -152,12 +153,15 @@
     <script src="js/admin/admin-features.js"></script>
     <script src="js/core/app.js"></script>
     <script>
-        // Load performance metrics
+        // Profile name/pic and performance-metrics widget. The stats that
+        // loadAdminDashboard() (in js/admin/admin-features.js) already covers
+        // (totalUsers, activeUsers, systemUptime, pendingApprovals, securityAlerts)
+        // are intentionally not duplicated here anymore.
         document.addEventListener('DOMContentLoaded', () => {
             const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
             const userName = user.name || translateRole('admin');
             document.getElementById('adminName').textContent = userName;
-            
+
             // Load profile picture with initials or uploaded image
             const profilePic = document.getElementById('navProfilePic');
             if (user.profilePic) {
@@ -166,36 +170,9 @@
                 const initials = user.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
                 profilePic.textContent = initials;
             }
-            
-            // Load real data
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
-            const courses = JSON.parse(localStorage.getItem('courses') || '[]');
-            const quizzes = JSON.parse(localStorage.getItem('quizzes') || '[]');
-            const assignments = JSON.parse(localStorage.getItem('assignments') || '[]');
-            
-            // Total users
-            document.getElementById('totalUsers').textContent = users.length;
-            
-            // Active users (last 30 days)
-            const thirtyDaysAgo = Date.now() - (30 * 86400000);
-            const activeUsers = users.filter(u => {
-                const lastActive = u.lastActive ? new Date(u.lastActive).getTime() : new Date(u.createdAt || Date.now()).getTime();
-                return lastActive > thirtyDaysAgo;
-            }).length;
-            document.getElementById('activeUsers').textContent = activeUsers;
-            
-            // System uptime (client-side = 100%)
-            document.getElementById('systemUptime').textContent = '100%';
-            
-            // Pending approvals (courses + quizzes + assignments)
-            const pending = courses.filter(c => c.status === 'pending').length + 
-                           quizzes.filter(q => q.status === 'pending').length + 
-                           assignments.filter(a => a.status === 'pending').length;
-            document.getElementById('pendingApprovals').textContent = pending;
-            
+
             const metrics = AdminFeatures.getPerformanceMetrics();
             const metricsContainer = document.getElementById('performanceMetrics');
-            const securityContainer = document.getElementById('securityAlerts');
             const lang = getCurrentLanguage();
             
             const labels = {
@@ -236,9 +213,7 @@
                     <strong>${t.uptime}:</strong> ${metrics.uptime}%
                 </div>
             `;
-            
-            securityContainer.innerHTML = `<p>${t.noSecurityAlerts}</p>`;
-            
+
             // Re-translate page after dynamic content is loaded
             translatePage();
         });

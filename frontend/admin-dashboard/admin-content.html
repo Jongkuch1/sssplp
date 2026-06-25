@@ -53,6 +53,8 @@
     </section>
 
     <script src="js/core/i18n.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script src="js/core/app.js"></script>
     <script>
         document.addEventListener('DOMContentLoaded', () => {
@@ -64,92 +66,100 @@
                 const initials = currentUser.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
                 profilePic.textContent = initials;
             }
-            
-            const courses = JSON.parse(localStorage.getItem('courses') || '[]');
-            const quizzes = JSON.parse(localStorage.getItem('quizzes') || '[]');
-            const assignments = JSON.parse(localStorage.getItem('assignments') || '[]');
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
-            
-            const pending = [];
-            
-            courses.filter(c => c.status === 'pending').forEach(c => {
-                const teacher = users.find(u => u.id === c.teacherId);
-                pending.push({
-                    type: 'course',
-                    id: c.id,
-                    title: c.title,
-                    subject: c.subject,
-                    teacher: teacher ? teacher.name : 'Unknown',
-                    date: c.createdAt
-                });
-            });
-            
-            quizzes.filter(q => q.status === 'pending').forEach(q => {
-                const teacher = users.find(u => u.id === q.teacherId);
-                pending.push({
-                    type: 'quiz',
-                    id: q.id,
-                    title: q.title,
-                    subject: q.subject,
-                    teacher: teacher ? teacher.name : 'Unknown',
-                    date: q.createdAt
-                });
-            });
-            
-            assignments.filter(a => a.status === 'pending').forEach(a => {
-                const teacher = users.find(u => u.id === a.teacherId);
-                pending.push({
-                    type: 'assignment',
-                    id: a.id,
-                    title: a.title,
-                    subject: a.subject,
-                    teacher: teacher ? teacher.name : 'Unknown',
-                    date: a.createdAt
-                });
-            });
-            
-            const container = document.getElementById('pendingList');
-            
-            if (pending.length === 0) {
-                container.innerHTML = '<p style="text-align: center; color: #6b7280; padding: 40px;">No pending approvals</p>';
-            } else {
-                container.innerHTML = pending.map(item => `
-                    <div class="activity-item" style="padding: 15px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 15px;">
-                        <i class="fas ${item.type === 'course' ? 'fa-book' : item.type === 'quiz' ? 'fa-question-circle' : 'fa-file-alt'}" style="color: #f59e0b; font-size: 1.5rem;"></i>
-                        <div style="flex: 1;">
-                            <strong>${item.title}</strong>
-                            <p style="margin: 5px 0; color: #6b7280;">${item.subject} • By ${item.teacher} • ${new Date(item.date).toLocaleString()}</p>
-                        </div>
-                        <div style="display: flex; gap: 10px;">
-                            <button class="btn btn-primary btn-sm" onclick="approveContent('${item.type}', ${item.id})">Approve</button>
-                            <button class="btn btn-secondary btn-sm" onclick="rejectContent('${item.type}', ${item.id})">Reject</button>
-                        </div>
-                    </div>
-                `).join('');
-            }
+
+            loadPendingApprovals();
         });
-        
-        function approveContent(type, id) {
-            const key = type === 'course' ? 'courses' : type === 'quiz' ? 'quizzes' : 'assignments';
-            const items = JSON.parse(localStorage.getItem(key) || '[]');
-            const item = items.find(i => i.id === id);
-            if (item) {
-                item.status = 'active';
-                localStorage.setItem(key, JSON.stringify(items));
-                alert('Content approved!');
-                location.reload();
+
+        async function loadPendingApprovals() {
+            const container = document.getElementById('pendingList');
+            try {
+                const [courses, quizzes, assignments] = await Promise.all([
+                    Data.courses.list({ status: 'pending' }),
+                    Data.quizzes.list({ status: 'pending' }),
+                    Data.assignments.list({ status: 'pending' })
+                ]);
+
+                const pending = [];
+
+                courses.forEach(c => {
+                    pending.push({
+                        type: 'course',
+                        id: c._id,
+                        title: c.title,
+                        subject: c.subject,
+                        teacher: c.teacherId?.name || 'Unknown',
+                        date: c.createdAt
+                    });
+                });
+
+                quizzes.forEach(q => {
+                    pending.push({
+                        type: 'quiz',
+                        id: q._id,
+                        title: q.title,
+                        subject: q.subject,
+                        teacher: q.teacherId?.name || 'Unknown',
+                        date: q.createdAt
+                    });
+                });
+
+                assignments.forEach(a => {
+                    pending.push({
+                        type: 'assignment',
+                        id: a._id,
+                        title: a.title,
+                        subject: a.subject,
+                        teacher: a.teacherId?.name || 'Unknown',
+                        date: a.createdAt
+                    });
+                });
+
+                if (pending.length === 0) {
+                    container.innerHTML = '<p style="text-align: center; color: #6b7280; padding: 40px;">No pending approvals</p>';
+                } else {
+                    container.innerHTML = pending.map(item => `
+                        <div class="activity-item" style="padding: 15px; border-bottom: 1px solid #e5e7eb; display: flex; align-items: center; gap: 15px;">
+                            <i class="fas ${item.type === 'course' ? 'fa-book' : item.type === 'quiz' ? 'fa-question-circle' : 'fa-file-alt'}" style="color: #f59e0b; font-size: 1.5rem;"></i>
+                            <div style="flex: 1;">
+                                <strong>${item.title}</strong>
+                                <p style="margin: 5px 0; color: #6b7280;">${item.subject} • By ${item.teacher} • ${item.date ? new Date(item.date).toLocaleString() : 'N/A'}</p>
+                            </div>
+                            <div style="display: flex; gap: 10px;">
+                                <button class="btn btn-primary btn-sm" onclick="approveContent('${item.type}', '${item.id}')">Approve</button>
+                                <button class="btn btn-secondary btn-sm" onclick="rejectContent('${item.type}', '${item.id}')">Reject</button>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            } catch (error) {
+                container.innerHTML = '<p style="text-align: center; color: #ef4444; padding: 40px;">Failed to load pending approvals.</p>';
+                console.warn('Failed to load pending approvals:', error.message);
             }
         }
-        
-        function rejectContent(type, id) {
-            const key = type === 'course' ? 'courses' : type === 'quiz' ? 'quizzes' : 'assignments';
-            const items = JSON.parse(localStorage.getItem(key) || '[]');
-            const item = items.find(i => i.id === id);
-            if (item) {
-                item.status = 'rejected';
-                localStorage.setItem(key, JSON.stringify(items));
+
+        function getDataApiForType(type) {
+            if (type === 'course') return Data.courses;
+            if (type === 'quiz') return Data.quizzes;
+            return Data.assignments;
+        }
+
+        async function approveContent(type, id) {
+            try {
+                await getDataApiForType(type).setStatus(id, 'approved');
+                alert('Content approved!');
+                location.reload();
+            } catch (error) {
+                alert('Failed to approve content: ' + error.message);
+            }
+        }
+
+        async function rejectContent(type, id) {
+            try {
+                await getDataApiForType(type).setStatus(id, 'rejected');
                 alert('Content rejected!');
                 location.reload();
+            } catch (error) {
+                alert('Failed to reject content: ' + error.message);
             }
         }
     </script>

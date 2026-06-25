@@ -12,7 +12,7 @@
         <div class="container">
             <div class="nav-brand">
                 <a href="teacher-dashboard.html">
-                    <img src="logo..png" alt="SSPLP Logo" class="logo">
+                    <img src="logo.svg" alt="SSPLP Logo" class="logo">
                     <span>SSPLP</span>
                 </a>
             </div>
@@ -62,6 +62,16 @@
                         </select>
                     </div>
                     <div class="form-group">
+                        <label for="grade">Grade Level</label>
+                        <select id="grade" required>
+                            <option value="">Select grade</option>
+                            <option value="9">Grade 9</option>
+                            <option value="10">Grade 10</option>
+                            <option value="11">Grade 11</option>
+                            <option value="12">Grade 12</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
                         <label for="timeLimit">Time Limit (minutes)</label>
                         <input type="number" id="timeLimit" min="5" max="180" value="30" required>
                     </div>
@@ -106,7 +116,9 @@
         </div>
     </section>
 
-    <script src="js/app.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
+    <script src="js/core/app.js"></script>
     <script>
         let questionCount = 1;
         
@@ -150,47 +162,46 @@
             questionCount = questions.length;
         }
         
-        document.getElementById('quizForm').addEventListener('submit', (e) => {
+        document.getElementById('quizForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
-            const user = JSON.parse(localStorage.getItem('currentUser'));
+
+            const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
             if (!user || user.role !== 'teacher') {
                 alert('Only teachers can create quizzes');
                 return;
             }
-            
+
+            const letterToIndex = { A: 0, B: 1, C: 2, D: 3 };
             const questions = [];
-            document.querySelectorAll('.question-item').forEach((item, index) => {
+            document.querySelectorAll('.question-item').forEach((item) => {
+                const options = [
+                    item.querySelector('.option-a').value,
+                    item.querySelector('.option-b').value,
+                    item.querySelector('.option-c').value,
+                    item.querySelector('.option-d').value
+                ];
                 questions.push({
-                    id: index + 1,
                     question: item.querySelector('.question-text').value,
-                    options: {
-                        A: item.querySelector('.option-a').value,
-                        B: item.querySelector('.option-b').value,
-                        C: item.querySelector('.option-c').value,
-                        D: item.querySelector('.option-d').value
-                    },
-                    correctAnswer: item.querySelector('.correct-answer').value
+                    options: options,
+                    correctAnswer: letterToIndex[item.querySelector('.correct-answer').value]
                 });
             });
-            
+
             const quiz = {
-                id: Date.now(),
-                teacherId: user.id,
                 title: document.getElementById('quizTitle').value,
                 subject: document.getElementById('subject').value,
+                grade: document.getElementById('grade').value,
                 timeLimit: parseInt(document.getElementById('timeLimit').value),
-                questions: questions,
-                createdAt: new Date().toISOString(),
-                status: 'active'
+                questions: questions
             };
-            
-            const quizzes = JSON.parse(localStorage.getItem('quizzes') || '[]');
-            quizzes.push(quiz);
-            localStorage.setItem('quizzes', JSON.stringify(quizzes));
-            
-            alert('Quiz created successfully!');
-            window.location.href = 'teacher-dashboard.html';
+
+            try {
+                await Data.quizzes.create(quiz);
+                alert('Quiz created successfully!');
+                window.location.href = 'teacher-dashboard.html';
+            } catch (error) {
+                alert('Failed to create quiz: ' + error.message);
+            }
         });
     </script>
 </body>

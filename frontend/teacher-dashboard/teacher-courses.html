@@ -38,20 +38,55 @@
 
     <section class="dashboard">
         <div class="container">
-            <h1>My Courses</h1>
-            <p>Manage your courses here</p>
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+                <div>
+                    <h1>My Courses</h1>
+                    <p>Manage your courses here</p>
+                </div>
+                <a href="course-builder.html" class="btn btn-primary"><i class="fas fa-plus"></i> New Course</a>
+            </div>
             <div class="card">
-                <p>Course management coming soon...</p>
+                <div id="coursesList"><p>Loading courses...</p></div>
             </div>
         </div>
     </section>
 
     <script src="js/core/i18n.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
+    <script src="js/core/universal.js"></script>
+    <script src="js/teacher/teacher-features.js"></script>
     <script src="js/core/app.js"></script>
     <script>
         document.getElementById('navToggle')?.addEventListener('click', () => {
             document.getElementById('navMenu')?.classList.toggle('active');
         });
+
+        async function loadMyCourses() {
+            const container = document.getElementById('coursesList');
+            try {
+                const courses = await TeacherFeatures.getCourses();
+                if (!courses.length) {
+                    container.innerHTML = '<p>No courses yet. Click "New Course" to create one.</p>';
+                    return;
+                }
+                container.innerHTML = courses.map(c => `
+                    <div class="content-item" style="padding: 15px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between; align-items: center;">
+                        <div>
+                            <strong>${c.title}</strong>
+                            <p style="margin: 5px 0; color: #6b7280;">${c.subject} • Grade ${c.grade} • ${(c.modules || []).length} module(s)</p>
+                            <small>Created: ${c.createdAt ? new Date(c.createdAt).toLocaleDateString() : 'N/A'}</small>
+                        </div>
+                        <span class="badge badge-${c.status === 'approved' ? 'success' : c.status === 'rejected' ? 'danger' : 'warning'}">${c.status}</span>
+                    </div>
+                `).join('');
+            } catch (error) {
+                container.innerHTML = '<p>Failed to load courses.</p>';
+                console.warn('Failed to load courses:', error.message);
+            }
+        }
+
+        document.addEventListener('DOMContentLoaded', loadMyCourses);
     </script>
 </body>
 </html>

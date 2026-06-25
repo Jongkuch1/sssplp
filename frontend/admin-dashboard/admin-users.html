@@ -75,12 +75,14 @@
         </div>
     </section>
 
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script src="js/core/i18n.js"></script>
     <script src="js/seed-data.js"></script>
     <script src="js/core/app.js"></script>
     <script>
-        function renderUserList() {
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
+        async function renderUserList() {
+            const users = await Data.users.list();
             const students = users.filter(u => u.role === 'student');
             const teachers = users.filter(u => u.role === 'teacher');
             const admins = users.filter(u => u.role === 'admin');

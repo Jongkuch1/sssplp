@@ -66,20 +66,31 @@
     <script src="js/core/i18n.js"></script>
     <script src="js/seed-data.js"></script>
     <script src="js/core/app.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script>
         let currentConversation = null;
         const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-        
-        function loadConversations() {
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
+
+        async function loadConversations() {
+            const users = await Data.users.list();
             const students = users.filter(u => u.role === 'student');
-            const messages = JSON.parse(localStorage.getItem('messages') || '[]');
-            
+
+            const unreadCounts = {};
+            await Promise.all(students.map(async (student) => {
+                try {
+                    const conversation = await Data.messages.getConversation(currentUser.id, student._id);
+                    unreadCounts[student._id] = conversation.filter(m => m.from === student._id && m.to === currentUser.id && !m.read).length;
+                } catch (e) {
+                    unreadCounts[student._id] = 0;
+                }
+            }));
+
             const conversationList = document.getElementById('conversationList');
             conversationList.innerHTML = students.map(student => {
-                const unread = messages.filter(m => m.from === student.id && m.to === currentUser.id && !m.read).length;
+                const unread = unreadCounts[student._id] || 0;
                 return `
-                    <div onclick="openConversation(${student.id}, '${student.name}')" style="padding: 15px; border-bottom: 1px solid #e5e7eb; cursor: pointer; hover: background: #f9fafb;">
+                    <div onclick="openConversation('${student._id}', '${student.name}')" style="padding: 15px; border-bottom: 1px solid #e5e7eb; cursor: pointer; hover: background: #f9fafb;">
                         <strong>${student.name}</strong>
                         ${unread > 0 ? `<span style="background: #ef4444; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-left: 10px;">${unread}</span>` : ''}
                         <p style="color: #6b7280; font-size: 14px; margin: 5px 0 0 0;">${student.email}</p>
@@ -87,26 +98,20 @@
                 `;
             }).join('');
         }
-        
-        function openConversation(studentId, studentName) {
+
+        async function openConversation(studentId, studentName) {
             currentConversation = studentId;
             document.getElementById('chatTitle').textContent = studentName;
             document.getElementById('messageInput').style.display = 'block';
-            loadMessages();
+            await loadMessages();
         }
-        
-        function loadMessages() {
-            const messages = JSON.parse(localStorage.getItem('messages') || '[]');
-            const conversation = messages.filter(m => 
-                (m.from === currentUser.id && m.to === currentConversation) ||
-                (m.from === currentConversation && m.to === currentUser.id)
-            ).sort((a, b) => a.timestamp - b.timestamp);
-            
-            messages.forEach(m => {
-                if (m.from === currentConversation && m.to === currentUser.id) m.read = true;
-            });
-            localStorage.setItem('messages', JSON.stringify(messages));
-            
+
+        async function loadMessages() {
+            const conversation = await Data.messages.getConversation(currentUser.id, currentConversation);
+
+            const unreadFromContact = conversation.filter(m => m.from === currentConversation && m.to === currentUser.id && !m.read);
+            await Promise.all(unreadFromContact.map(m => Data.messages.markRead(m._id)));
+
             const messageArea = document.getElementById('messageArea');
             messageArea.innerHTML = conversation.map(m => {
                 const isMe = m.from === currentUser.id;
@@ -120,36 +125,40 @@
                 `;
             }).join('');
             messageArea.scrollTop = messageArea.scrollHeight;
-            loadConversations();
+            await loadConversations();
         }
-        
-        function sendMessage() {
+
+        async function sendMessage() {
             const input = document.getElementById('newMessage');
             const text = input.value.trim();
             if (!text || !currentConversation) return;
-            
-            const messages = JSON.parse(localStorage.getItem('messages') || '[]');
-            messages.push({
-                id: Date.now(),
+
+            await Data.messages.send({
                 from: currentUser.id,
                 to: currentConversation,
-                text: text,
-                timestamp: Date.now(),
-                read: false
+                text: text
             });
-            localStorage.setItem('messages', JSON.stringify(messages));
+
+            await Data.notifications.send({
+                userId: currentConversation,
+                type: 'message',
+                message: `New message from ${currentUser.name}`,
+                channel: 'in-app',
+                link: 'messaging.html'
+            });
+
             input.value = '';
-            loadMessages();
+            await loadMessages();
         }
-        
+
         document.getElementById('newMessage')?.addEventListener('keypress', (e) => {
             if (e.key === 'Enter') sendMessage();
         });
-        
+
         document.addEventListener('DOMContentLoaded', () => {
             loadConversations();
         });
-        
+
         document.getElementById('navToggle')?.addEventListener('click', () => {
             document.getElementById('navMenu')?.classList.toggle('active');
         });

@@ -13,7 +13,7 @@
         <div class="container">
             <div class="nav-brand">
                 <a href="teacher-dashboard.html">
-                    <img src="logo..png" alt="SSPLP Logo" class="logo">
+                    <img src="logo.svg" alt="SSPLP Logo" class="logo">
                     <span>SSPLP</span>
                 </a>
             </div>
@@ -83,9 +83,11 @@
         </div>
     </section>
 
-    <script src="js/universal.js"></script>
-    <script src="js/teacher-features.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
+    <script src="js/core/universal.js"></script>
+    <script src="js/teacher/teacher-features.js"></script>
+    <script src="js/core/app.js"></script>
     <script>
         let moduleCount = 0;
 
@@ -111,33 +113,29 @@
             container.appendChild(moduleDiv);
         }
 
-        document.getElementById('courseForm').addEventListener('submit', (e) => {
+        document.getElementById('courseForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            
-            const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
+
             const modules = Array.from(document.querySelectorAll('.module-item')).map(m => ({
                 title: m.querySelector('.module-title').value,
-                description: m.querySelector('.module-description').value
+                content: m.querySelector('.module-description').value
             }));
 
-            const courses = JSON.parse(localStorage.getItem('courses') || '[]');
             const newCourse = {
-                id: Date.now(),
-                teacherId: user.id,
                 title: document.getElementById('courseTitle').value,
                 subject: document.getElementById('courseSubject').value,
                 grade: document.getElementById('courseGrade').value,
                 description: document.getElementById('courseDescription').value,
-                modules,
-                createdAt: new Date().toISOString(),
-                status: 'active'
+                modules
             };
-            
-            courses.push(newCourse);
-            localStorage.setItem('courses', JSON.stringify(courses));
-            
-            alert('Course created successfully!');
-            window.location.href = 'teacher-courses.html';
+
+            try {
+                await TeacherFeatures.createCourse(newCourse);
+                alert('Course created successfully!');
+                window.location.href = 'teacher-courses.html';
+            } catch (error) {
+                alert('Failed to create course: ' + error.message);
+            }
         });
 
         // Add first module by default

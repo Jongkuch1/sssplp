@@ -12,7 +12,7 @@
         <div class="container">
             <div class="nav-brand">
                 <a href="student-dashboard.html">
-                    <img src="logo..png" alt="SSPLP Logo" class="logo">
+                    <img src="logo.svg" alt="SSPLP Logo" class="logo">
                     <span>SSPLP</span>
                 </a>
             </div>
@@ -51,19 +51,22 @@
         </div>
     </section>
 
-    <script src="js/app.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
+    <script src="js/core/app.js"></script>
     <script>
-        let quiz, currentQuestion = 0, answers = {}, startTime, timerInterval;
+        let quiz, currentQuestion = 0, answers = {}, startTime, timerInterval, submitting = false;
 
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             const user = JSON.parse(localStorage.getItem('currentUser'));
             if (!user || user.role !== 'student') {
                 window.location.href = 'login.html';
                 return;
             }
 
-            const quizId = parseInt(localStorage.getItem('currentQuizId'));
-            quiz = JSON.parse(localStorage.getItem('quizzes') || '[]').find(q => q.id === quizId);
+            const quizId = localStorage.getItem('currentQuizId');
+            const quizzes = await Data.learning.getQuizzes();
+            quiz = quizzes.find(q => q._id === quizId);
 
             if (!quiz) {
                 alert('Quiz not found');
@@ -91,7 +94,7 @@
                 if (timeLeft <= 0) {
                     clearInterval(timerInterval);
                     alert('Time is up!');
-                    submitQuiz();
+                    submitQuiz().catch(err => console.error('Auto-submit failed:', err));
                 }
                 timeLeft--;
             }
@@ -110,15 +113,15 @@
                     <p style="font-size: 1.1rem; margin: 20px 0;">${q.question}</p>
                 </div>
                 <div style="display: grid; gap: 15px;">
-                    ${Object.entries(q.options).map(([key, value]) => `
+                    ${q.options.map((value, idx) => `
                         <label style="display: flex; align-items: center; padding: 15px; border: 2px solid #e5e7eb; border-radius: 8px; cursor: pointer; transition: all 0.2s;"
-                               onmouseover="this.style.borderColor='#6d28d9'" 
+                               onmouseover="this.style.borderColor='#6d28d9'"
                                onmouseout="this.style.borderColor='#e5e7eb'">
-                            <input type="radio" name="answer" value="${key}" 
-                                   ${answers[currentQuestion] === key ? 'checked' : ''}
-                                   onchange="saveAnswer('${key}')"
+                            <input type="radio" name="answer" value="${idx}"
+                                   ${answers[currentQuestion] === idx ? 'checked' : ''}
+                                   onchange="saveAnswer(${idx})"
                                    style="margin-right: 10px; width: 20px; height: 20px;">
-                            <span style="font-size: 1rem;"><strong>${key}.</strong> ${value}</span>
+                            <span style="font-size: 1rem;"><strong>${String.fromCharCode(65 + idx)}.</strong> ${value}</span>
                         </label>
                     `).join('')}
                 </div>
@@ -131,7 +134,7 @@
         }
 
         function saveAnswer(answer) {
-            answers[currentQuestion] = answer;
+            answers[currentQuestion] = Number(answer);
         }
 
         function previousQuestion() {
@@ -148,45 +151,41 @@
             }
         }
 
-        function submitQuiz() {
+        async function submitQuiz() {
+            if (submitting) return;
             clearInterval(timerInterval);
 
             const unanswered = quiz.questions.length - Object.keys(answers).length;
             if (unanswered > 0) {
                 if (!confirm(`You have ${unanswered} unanswered question(s). Submit anyway?`)) {
+                    startTimer(Math.max(0, quiz.timeLimit * 60 - Math.round((Date.now() - startTime) / 1000)));
                     return;
                 }
             }
 
-            // Calculate score
-            let correct = 0;
-            quiz.questions.forEach((q, i) => {
-                if (answers[i] === q.correctAnswer) {
-                    correct++;
-                }
-            });
+            submitting = true;
+            document.getElementById('submitBtn').disabled = true;
 
-            const score = Math.round((correct / quiz.questions.length) * 100);
-            const user = JSON.parse(localStorage.getItem('currentUser'));
+            try {
+                const answerList = quiz.questions.map((q, i) => ({
+                    selectedAnswer: answers[i] !== undefined ? answers[i] : -1
+                }));
+                const timeSpent = Math.round((Date.now() - startTime) / 60000);
 
-            // Save attempt
-            const attempt = {
-                id: Date.now(),
-                quizId: quiz.id,
-                studentId: user.id,
-                score: score,
-                correctAnswers: correct,
-                totalQuestions: quiz.questions.length,
-                answers: answers,
-                completedAt: new Date().toISOString()
-            };
+                const attempt = await Data.learning.submitQuizAttempt({
+                    quizId: quiz._id,
+                    answers: answerList,
+                    timeSpent
+                });
 
-            const attempts = JSON.parse(localStorage.getItem('quizAttempts') || '[]');
-            attempts.push(attempt);
-            localStorage.setItem('quizAttempts', JSON.stringify(attempts));
-
-            alert(`Quiz Completed!\n\nYour Score: ${score}%\nCorrect Answers: ${correct}/${quiz.questions.length}`);
-            window.location.href = 'student-quizzes.html';
+                alert(`Quiz Completed!\n\nYour Score: ${attempt.score}%\nCorrect Answers: ${attempt.totalPoints}/${attempt.maxPoints}\nResult: ${attempt.passed ? 'Passed' : 'Not Passed'}`);
+                window.location.href = 'student-quizzes.html';
+            } catch (error) {
+                console.error('Failed to submit quiz:', error);
+                alert('Failed to submit quiz: ' + error.message);
+                submitting = false;
+                document.getElementById('submitBtn').disabled = false;
+            }
         }
     </script>
 </body>

@@ -28,17 +28,19 @@ const initializeDatabase = async () => {
     console.log('Creating demo users...');
 
     // Create demo users
+    const hashedPassword = await bcrypt.hash('password123', 10);
+
     const adminUser = await User.create({
       name: 'Administrator',
       email: 'admin@ssplp.edu.ss',
-      password: 'password123',
-      role: 'administrator'
+      password: hashedPassword,
+      role: 'admin'
     });
 
     const teacherUser = await User.create({
       name: 'Teacher John',
       email: 'teacher@ssplp.edu.ss',
-      password: 'password123',
+      password: hashedPassword,
       role: 'teacher',
       subjects: ['Mathematics', 'Physics']
     });
@@ -46,7 +48,7 @@ const initializeDatabase = async () => {
     const studentUser = await User.create({
       name: 'Student Mary',
       email: 'student@ssplp.edu.ss',
-      password: 'password123',
+      password: hashedPassword,
       role: 'student',
       grade: 'S3',
       subjects: ['Mathematics', 'English Language', 'Biology', 'Chemistry', 'Physics']
@@ -102,62 +104,42 @@ const initializeDatabase = async () => {
       title: 'Algebra Basics Quiz',
       subject: 'Mathematics',
       grade: 'S3',
-      description: 'Test your understanding of basic algebraic concepts',
       questions: [
         {
           question: 'What is the value of x in the equation 2x + 5 = 15?',
-          type: 'multiple-choice',
-          options: [
-            { text: '5', isCorrect: true },
-            { text: '10', isCorrect: false },
-            { text: '7.5', isCorrect: false },
-            { text: '2.5', isCorrect: false }
-          ],
-          explanation: 'Subtract 5 from both sides: 2x = 10, then divide by 2: x = 5',
-          points: 2
+          options: ['5', '10', '7.5', '2.5'],
+          correctAnswer: 0
         },
         {
           question: 'Simplify: 3x + 2x - x',
-          type: 'multiple-choice',
-          options: [
-            { text: '4x', isCorrect: true },
-            { text: '5x', isCorrect: false },
-            { text: '6x', isCorrect: false },
-            { text: '2x', isCorrect: false }
-          ],
-          explanation: 'Combine like terms: 3x + 2x - x = 5x - x = 4x',
-          points: 2
+          options: ['4x', '5x', '6x', '2x'],
+          correctAnswer: 0
         }
       ],
       timeLimit: 15,
-      passingScore: 70,
-      maxAttempts: 3,
-      createdBy: teacherUser._id
+      status: 'approved',
+      teacherId: teacherUser._id
     });
 
     await Quiz.create({
       title: 'English Grammar Quiz',
       subject: 'English Language',
       grade: 'S3',
-      description: 'Test your knowledge of English grammar rules',
       questions: [
         {
           question: 'Which sentence is grammatically correct?',
-          type: 'multiple-choice',
           options: [
-            { text: 'She don\'t like apples.', isCorrect: false },
-            { text: 'She doesn\'t like apples.', isCorrect: true },
-            { text: 'She not like apples.', isCorrect: false },
-            { text: 'She no like apples.', isCorrect: false }
+            'She don\'t like apples.',
+            'She doesn\'t like apples.',
+            'She not like apples.',
+            'She no like apples.'
           ],
-          explanation: 'Use "doesn\'t" (does not) with third person singular subjects',
-          points: 1
+          correctAnswer: 1
         }
       ],
       timeLimit: 10,
-      passingScore: 60,
-      maxAttempts: 5,
-      createdBy: teacherUser._id
+      status: 'approved',
+      teacherId: teacherUser._id
     });
 
     console.log('Database initialized successfully!');

@@ -100,10 +100,12 @@
     <script src="js/core/i18n.js"></script>
     <script src="js/seed-data.js"></script>
     <script src="js/core/app.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             const user = JSON.parse(localStorage.getItem('currentUser') || '{}');
-            
+
             // Load profile picture with initials or uploaded image
             const profilePic = document.getElementById('navProfilePic');
             if (user.profilePic) {
@@ -112,43 +114,43 @@
                 const initials = user.name.split(' ').map(n => n[0]).join('').toUpperCase().substring(0, 2);
                 profilePic.textContent = initials;
             }
-            
+
             // Get data
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
+            const users = await Data.users.list();
             const students = users.filter(u => u.role === 'student');
-            const courses = JSON.parse(localStorage.getItem('courses') || '[]');
-            const teacherCourses = courses.filter(c => c.teacherId === user.id);
-            const assignments = JSON.parse(localStorage.getItem('assignments') || '[]').filter(a => a.teacherId === user.id);
-            const quizAttempts = JSON.parse(localStorage.getItem('quizAttempts') || '[]');
-            const submissions = JSON.parse(localStorage.getItem('submissions') || '[]');
-            
+            const teacherCourses = await Data.courses.list({ mine: 'true' });
+            const assignments = await Data.assignments.list({ mine: 'true' });
+            const quizAttempts = await Data.learning.getQuizAttempts({ all: 'true' });
+            const submissions = await Promise.all(students.map(s => Data.submissions.getForStudent(s._id)));
+            const allSubmissions = submissions.flat();
+
             // Calculate statistics
             document.getElementById('totalStudents').textContent = students.length;
             document.getElementById('activeCourses').textContent = teacherCourses.length;
             document.getElementById('totalAssignments').textContent = assignments.length;
-            
+
             // Class average from both quizzes and assignments
-            const gradedSubmissions = submissions.filter(s => s.status === 'graded' && s.grade !== undefined);
+            const gradedSubmissions = allSubmissions.filter(s => s.status === 'graded' && s.grade !== undefined);
             const allScores = [...quizAttempts.map(a => a.score), ...gradedSubmissions.map(s => s.grade)];
-            
+
             if (allScores.length > 0) {
                 const avg = Math.round(allScores.reduce((sum, score) => sum + score, 0) / allScores.length);
                 document.getElementById('classAverage').textContent = avg + '%';
             } else {
                 document.getElementById('classAverage').textContent = 'N/A';
             }
-            
+
             // Subject performance
             const subjectScores = {};
             quizAttempts.forEach(attempt => {
-                const subject = attempt.subject || 'Unknown';
+                const subject = attempt.quizId?.subject || 'Unknown';
                 if (!subjectScores[subject]) {
                     subjectScores[subject] = { total: 0, count: 0 };
                 }
                 subjectScores[subject].total += attempt.score || 0;
                 subjectScores[subject].count++;
             });
-            
+
             const subjectPerf = document.getElementById('subjectPerformance');
             const subjects = Object.keys(subjectScores);
             if (subjects.length > 0) {
@@ -163,26 +165,28 @@
             } else {
                 subjectPerf.innerHTML = '<p data-i18n="noDataAvailable">No data available yet</p>';
             }
-            
+
             // Top performers
             const studentScores = {};
             quizAttempts.forEach(attempt => {
-                if (!studentScores[attempt.studentId]) {
-                    studentScores[attempt.studentId] = { total: 0, count: 0 };
+                const studentId = attempt.userId?._id || attempt.userId;
+                if (!studentId) return;
+                if (!studentScores[studentId]) {
+                    studentScores[studentId] = { total: 0, count: 0 };
                 }
-                studentScores[attempt.studentId].total += attempt.score || 0;
-                studentScores[attempt.studentId].count++;
+                studentScores[studentId].total += attempt.score || 0;
+                studentScores[studentId].count++;
             });
-            
+
             const topPerf = document.getElementById('topPerformers');
             const studentAvgs = Object.keys(studentScores).map(id => ({
                 id,
                 avg: studentScores[id].total / studentScores[id].count
             })).sort((a, b) => b.avg - a.avg).slice(0, 5);
-            
+
             if (topPerf && studentAvgs.length > 0) {
                 topPerf.innerHTML = studentAvgs.map((s, i) => {
-                    const student = users.find(u => u.id === parseInt(s.id));
+                    const student = users.find(u => u._id === s.id);
                     return `
                         <div class="info-item">
                             <strong>${i + 1}. ${student ? student.name : 'Student ' + s.id}:</strong> ${Math.round(s.avg)}%
@@ -192,41 +196,42 @@
             } else if (topPerf) {
                 topPerf.innerHTML = '<p data-i18n="noDataAvailable">No data available yet</p>';
             }
-            
+
             // Recent activity
             const recentAct = document.getElementById('recentActivity');
             const allActivity = [
-                ...submissions.map(s => ({ type: 'submission', data: s, time: s.submittedAt })),
-                ...quizAttempts.map(q => ({ type: 'quiz', data: q, time: q.completedAt }))
+                ...allSubmissions.map(s => ({ type: 'submission', data: s, time: new Date(s.submittedAt).getTime() })),
+                ...quizAttempts.map(q => ({ type: 'quiz', data: q, time: new Date(q.createdAt).getTime() }))
             ].sort((a, b) => b.time - a.time).slice(0, 5);
-            
+
             if (allActivity.length > 0) {
                 recentAct.innerHTML = allActivity.map(activity => {
-                    const student = users.find(u => u.id === activity.data.studentId);
-                    const assignment = assignments.find(a => a.id === activity.data.assignmentId);
-                    const text = activity.type === 'submission' 
-                        ? `submitted ${assignment ? assignment.title : 'assignment'}`
-                        : `completed ${activity.data.subject} quiz (${activity.data.score}%)`;
+                    const text = activity.type === 'submission'
+                        ? `submitted an assignment`
+                        : `completed ${activity.data.quizId?.subject || 'a'} quiz (${activity.data.score}%)`;
+                    const studentName = activity.type === 'quiz'
+                        ? (activity.data.userId?.name || 'Student')
+                        : 'Student';
                     return `
                         <div class="info-item">
-                            ${student ? student.name : 'Student'} ${text}
+                            ${studentName} ${text}
                         </div>
                     `;
                 }).join('');
             } else {
                 recentAct.innerHTML = '<p data-i18n="noRecentActivity">No recent activity</p>';
             }
-            
+
             // Needs attention
             const needsAtt = document.getElementById('needsAttention');
             const lowPerformers = Object.keys(studentScores).map(id => ({
                 id,
                 avg: studentScores[id].total / studentScores[id].count
             })).filter(s => s.avg < 60).slice(0, 5);
-            
+
             if (lowPerformers.length > 0) {
                 needsAtt.innerHTML = lowPerformers.map(s => {
-                    const student = users.find(u => u.id === parseInt(s.id));
+                    const student = users.find(u => u._id === s.id);
                     return `
                         <div class="info-item" style="color: #ef4444;">
                             <strong>${student ? student.name : 'Student ' + s.id}:</strong> ${Math.round(s.avg)}% <span data-i18n="needsHelp">needs help</span>
@@ -236,7 +241,7 @@
             } else {
                 needsAtt.innerHTML = '<p style="color: #10b981;" data-i18n="allStudentsOnTrack">All students on track!</p>';
             }
-            
+
             translatePage();
         });
         

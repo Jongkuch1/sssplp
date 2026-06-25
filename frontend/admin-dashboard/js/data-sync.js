@@ -6,8 +6,11 @@ class DataSync {
     }
 
     async checkBackend() {
+        const backendUrl = window.location.hostname === 'localhost'
+            ? 'http://localhost:5000/api/health'
+            : '/api/health';
         try {
-            const response = await fetch('http://localhost:5000/api/health');
+            const response = await fetch(backendUrl);
             this.backendAvailable = response.ok;
             console.log(this.backendAvailable ? '✅ Backend connected - Using real database' : '⚠️ Backend offline - Using localStorage');
         } catch {
@@ -17,29 +20,30 @@ class DataSync {
     }
 
     async syncAllData() {
-        if (!this.backendAvailable || !window.API) {
+        const token = localStorage.getItem('token');
+        if (!this.backendAvailable || !window.API || !token) {
             console.log('Using localStorage data');
             return;
         }
 
         try {
             // Sync users from database
-            const users = await API.users.getAll();
+            const users = await API.users.getAll(token);
             localStorage.setItem('users', JSON.stringify(users));
             console.log(`✅ Synced ${users.length} users from database`);
 
             // Sync courses
-            const courses = await API.courses.getAll();
+            const courses = await API.courses.getAll(token);
             localStorage.setItem('courses', JSON.stringify(courses));
             console.log(`✅ Synced ${courses.length} courses from database`);
 
             // Sync quizzes
-            const quizzes = await API.quizzes.getAll();
+            const quizzes = await API.quizzes.getAll(token);
             localStorage.setItem('quizzes', JSON.stringify(quizzes));
             console.log(`✅ Synced ${quizzes.length} quizzes from database`);
 
             // Sync assignments
-            const assignments = await API.assignments.getAll();
+            const assignments = await API.assignments.getAll(token);
             localStorage.setItem('assignments', JSON.stringify(assignments));
             console.log(`✅ Synced ${assignments.length} assignments from database`);
 
@@ -50,9 +54,10 @@ class DataSync {
     }
 
     async getUserData() {
-        if (this.backendAvailable && window.API) {
+        const token = localStorage.getItem('token');
+        if (this.backendAvailable && window.API && token) {
             try {
-                return await API.users.getAll();
+                return await API.users.getAll(token);
             } catch (error) {
                 console.error('Failed to fetch users:', error);
             }
@@ -61,9 +66,10 @@ class DataSync {
     }
 
     async getCourseData() {
-        if (this.backendAvailable && window.API) {
+        const token = localStorage.getItem('token');
+        if (this.backendAvailable && window.API && token) {
             try {
-                return await API.courses.getAll();
+                return await API.courses.getAll(token);
             } catch (error) {
                 console.error('Failed to fetch courses:', error);
             }
@@ -72,9 +78,10 @@ class DataSync {
     }
 
     async getQuizData() {
-        if (this.backendAvailable && window.API) {
+        const token = localStorage.getItem('token');
+        if (this.backendAvailable && window.API && token) {
             try {
-                return await API.quizzes.getAll();
+                return await API.quizzes.getAll(token);
             } catch (error) {
                 console.error('Failed to fetch quizzes:', error);
             }
@@ -83,9 +90,10 @@ class DataSync {
     }
 
     async getAssignmentData() {
-        if (this.backendAvailable && window.API) {
+        const token = localStorage.getItem('token');
+        if (this.backendAvailable && window.API && token) {
             try {
-                return await API.assignments.getAll();
+                return await API.assignments.getAll(token);
             } catch (error) {
                 console.error('Failed to fetch assignments:', error);
             }

@@ -13,7 +13,7 @@
         <div class="container">
             <div class="nav-brand">
                 <a href="admin-dashboard.html">
-                    <img src="logo..png" alt="SSPLP Logo" class="logo">
+                    <img src="logo.svg" alt="SSPLP Logo" class="logo">
                     <span>SSPLP</span>
                 </a>
             </div>
@@ -133,12 +133,14 @@
         </div>
     </div>
 
-    <script src="js/universal.js"></script>
-    <script src="js/admin-features.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
+    <script src="js/core/universal.js"></script>
+    <script src="js/admin/admin-features.js"></script>
+    <script src="js/core/app.js"></script>
     <script>
-        function loadUsers() {
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
+        async function loadUsers() {
+            const users = await Data.users.list();
             const search = document.getElementById('searchUsers').value.toLowerCase();
             const role = document.getElementById('roleFilter').value;
             const status = document.getElementById('statusFilter').value;
@@ -159,10 +161,10 @@
                     <td><span class="badge badge-${u.status === 'active' ? 'success' : 'warning'}">${u.status || 'active'}</span></td>
                     <td>${new Date(u.createdAt || Date.now()).toLocaleDateString()}</td>
                     <td>
-                        <button class="btn-icon" onclick="editUser('${u.email}')">
+                        <button class="btn-icon" onclick="editUser('${u._id}')">
                             <i class="fas fa-edit"></i>
                         </button>
-                        <button class="btn-icon" onclick="deactivateUser('${u.email}')">
+                        <button class="btn-icon" onclick="deactivateUser('${u._id}')">
                             <i class="fas fa-ban"></i>
                         </button>
                     </td>
@@ -182,9 +184,9 @@
             document.getElementById(id).style.display = 'none';
         }
 
-        document.getElementById('createUserForm').addEventListener('submit', (e) => {
+        document.getElementById('createUserForm').addEventListener('submit', async (e) => {
             e.preventDefault();
-            AdminFeatures.createUser({
+            await AdminFeatures.createUser({
                 name: document.getElementById('userName').value,
                 email: document.getElementById('userEmail').value,
                 role: document.getElementById('userRole').value,
@@ -197,23 +199,23 @@
         function importUsers() {
             const file = document.getElementById('csvFile').files[0];
             if (!file) return;
-            
+
             const reader = new FileReader();
-            reader.onload = (e) => {
-                AdminFeatures.bulkImportUsers(e.target.result);
+            reader.onload = async (e) => {
+                await AdminFeatures.bulkImportUsers(e.target.result);
                 closeModal('importModal');
                 loadUsers();
             };
             reader.readAsText(file);
         }
 
-        function editUser(email) {
+        function editUser(userId) {
             Universal.showToast('Edit functionality - coming soon', 'info');
         }
 
-        function deactivateUser(email) {
+        async function deactivateUser(userId) {
             if (confirm('Deactivate this user?')) {
-                AdminFeatures.deactivateUser(email);
+                await AdminFeatures.deactivateUser(userId);
                 loadUsers();
             }
         }

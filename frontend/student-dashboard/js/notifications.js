@@ -1,24 +1,16 @@
-// Notification System
+// Notification System - backed by the real API via window.Data
 class NotificationSystem {
-    constructor() {
-        this.notifications = JSON.parse(localStorage.getItem('notifications') || '{}');
-    }
-
-    // Create notification
-    create(userEmail, notification) {
-        if (!this.notifications[userEmail]) {
-            this.notifications[userEmail] = [];
-        }
-        
-        this.notifications[userEmail].push({
-            id: Date.now(),
-            ...notification,
-            read: false,
-            timestamp: Date.now()
+    // Create notification (persists via the backend)
+    async create(userId, notification) {
+        const result = await Data.notifications.send({
+            userId,
+            type: notification.type,
+            message: notification.message,
+            link: notification.link,
+            channel: 'in-app'
         });
-        
-        localStorage.setItem('notifications', JSON.stringify(this.notifications));
         this.showBrowserNotification(notification);
+        return result;
     }
 
     // Show browser notification
@@ -26,7 +18,7 @@ class NotificationSystem {
         if ('Notification' in window && Notification.permission === 'granted') {
             new Notification('SSPLP', {
                 body: notification.message,
-                icon: 'logo..png'
+                icon: 'logo.svg'
             });
         }
     }
@@ -41,26 +33,20 @@ class NotificationSystem {
     }
 
     // Get user notifications
-    getNotifications(userEmail) {
-        return this.notifications[userEmail] || [];
+    async getNotifications(userId) {
+        const result = await Data.notifications.list(userId);
+        return result.notifications || [];
     }
 
     // Mark as read
-    markAsRead(userEmail, notificationId) {
-        if (this.notifications[userEmail]) {
-            const notification = this.notifications[userEmail]
-                .find(n => n.id === notificationId);
-            if (notification) {
-                notification.read = true;
-                localStorage.setItem('notifications', JSON.stringify(this.notifications));
-            }
-        }
+    async markAsRead(notificationId) {
+        return await Data.notifications.markRead(notificationId);
     }
 
     // Get unread count
-    getUnreadCount(userEmail) {
-        const userNotifications = this.notifications[userEmail] || [];
-        return userNotifications.filter(n => !n.read).length;
+    async getUnreadCount(userId) {
+        const notifications = await this.getNotifications(userId);
+        return notifications.filter(n => !n.read).length;
     }
 
     // Simulate email notification (for demo)
@@ -68,7 +54,7 @@ class NotificationSystem {
         console.log(`📧 Email sent to ${email}`);
         console.log(`Subject: ${subject}`);
         console.log(`Message: ${message}`);
-        
+
         // In production, this would call an email API
         return {
             success: true,
@@ -80,7 +66,7 @@ class NotificationSystem {
     sendSMSNotification(phone, message) {
         console.log(`📱 SMS sent to ${phone}`);
         console.log(`Message: ${message}`);
-        
+
         // In production, this would call an SMS API (Twilio, etc.)
         return {
             success: true,

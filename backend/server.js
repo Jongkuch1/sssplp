@@ -28,6 +28,8 @@ app.use('/api/adaptive', require('./routes/adaptive'));
 app.use('/api/reports', require('./routes/reports'));
 app.use('/api/learning', require('./routes/learning'));
 app.use('/api/ai', require('./routes/ai'));
+app.use('/api/submissions', require('./routes/submissions'));
+app.use('/api/audit-logs', require('./routes/auditlogs'));
 
 // Health Check
 app.get('/api/health', (req, res) => {

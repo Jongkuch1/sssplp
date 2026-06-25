@@ -81,28 +81,33 @@
     <script src="js/core/app.js"></script>
     <script src="js/seed-data.js"></script>
     <script src="js/load-profile.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             translatePage();
             const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-            const quizAttempts = JSON.parse(localStorage.getItem('quizAttempts') || '[]');
-            const userAttempts = quizAttempts.filter(q => q.studentId === currentUser.id);
-            
+            const userAttempts = await Data.learning.getQuizAttempts({ studentId: currentUser.id });
+
             document.getElementById('completedQuizzes').textContent = userAttempts.length;
-            
+
             if (userAttempts.length > 0) {
                 const avgScore = Math.round(userAttempts.reduce((sum, q) => sum + q.score, 0) / userAttempts.length);
                 document.getElementById('averageScore').textContent = avgScore + '%';
-                
-                const subjects = [...new Set(userAttempts.map(q => q.subject))];
+
+                const subjects = [...new Set(userAttempts.map(q => q.quizId?.subject).filter(Boolean))];
                 document.getElementById('subjectsStudied').textContent = subjects.length;
             }
-            
+
+            const progress = await Data.learning.getProgress();
+            const totalMinutes = progress.reduce((sum, p) => sum + (p.timeSpent || 0), 0);
+            document.getElementById('timeSpent').textContent = Math.round(totalMinutes / 60) + 'h';
+
             document.getElementById('recentQuizzes').innerHTML = userAttempts.slice(-5).reverse().map(q => `
                 <div style="padding: 15px; border-bottom: 1px solid #e5e7eb; display: flex; justify-content: space-between;">
                     <div>
-                        <strong>${q.subject}</strong>
-                        <p style="color: #6b7280; margin: 5px 0;">${new Date(q.completedAt).toLocaleDateString()}</p>
+                        <strong>${q.quizId?.subject || 'Unknown'}</strong>
+                        <p style="color: #6b7280; margin: 5px 0;">${new Date(q.createdAt).toLocaleDateString()}</p>
                     </div>
                     <div style="text-align: right;">
                         <strong style="color: ${q.score >= 70 ? '#10b981' : '#ef4444'}; font-size: 24px;">${q.score}%</strong>

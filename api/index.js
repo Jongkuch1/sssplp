@@ -74,6 +74,8 @@ const adaptiveRoutes = require('../backend/routes/adaptive');
 const reportsRoutes = require('../backend/routes/reports');
 const learningRoutes = require('../backend/routes/learning');
 const aiRoutes = require('../backend/routes/ai');
+const submissionsRoutes = require('../backend/routes/submissions');
+const auditLogsRoutes = require('../backend/routes/auditlogs');
 
 // Routes
 app.use('/api/auth', authRoutes);
@@ -89,6 +91,8 @@ app.use('/api/adaptive', adaptiveRoutes);
 app.use('/api/reports', reportsRoutes);
 app.use('/api/learning', learningRoutes);
 app.use('/api/ai', aiRoutes);
+app.use('/api/submissions', submissionsRoutes);
+app.use('/api/audit-logs', auditLogsRoutes);
 
 // Health Check
 app.get('/api/health', (req, res) => {

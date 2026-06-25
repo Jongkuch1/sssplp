@@ -129,9 +129,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     
                     // Redirect based on role
                     if (response.user.role === 'student') {
-                        window.location.href = '../student-dashboard/student-dashboard.html';
+                        window.location.href = '/student/student-dashboard.html';
                     } else if (response.user.role === 'teacher') {
-                        window.location.href = '../teacher-dashboard/teacher-dashboard.html';
+                        window.location.href = '/teacher/teacher-dashboard.html';
                     } else if (response.user.role === 'admin') {
                         window.location.href = 'admin-dashboard.html';
                     }
@@ -149,9 +149,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 localStorage.setItem('currentUser', JSON.stringify(user));
                 
                 if (user.role === 'student') {
-                    window.location.href = '../student-dashboard/student-dashboard.html';
+                    window.location.href = '/student/student-dashboard.html';
                 } else if (user.role === 'teacher') {
-                    window.location.href = '../teacher-dashboard/teacher-dashboard.html';
+                    window.location.href = '/teacher/teacher-dashboard.html';
                 } else if (user.role === 'admin') {
                     window.location.href = 'admin-dashboard.html';
                 }

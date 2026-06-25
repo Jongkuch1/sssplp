@@ -1,6 +1,7 @@
 const express = require('express');
 const router = express.Router();
 const User = require('../models/User');
+const Notification = require('../models/Notification');
 const auth = require('../middleware/auth');
 
 // FR09: Send notification (Email/SMS/In-App)
@@ -36,10 +37,16 @@ router.post('/send', auth, async (req, res) => {
 
     // In-app notification (stored in database)
     if (channel === 'in-app') {
-      // Store notification in user's notification array or separate collection
+      const notification = await Notification.create({
+        userId: user._id,
+        type,
+        message,
+        link: req.body.link
+      });
       result.stored = true;
+      result.notification = notification;
     }
-    
+
     res.json({ success: true, message: 'Notification sent', result });
   } catch (error) {
     res.status(500).json({ message: 'Failed to send notification', error: error.message });
@@ -49,8 +56,18 @@ router.post('/send', auth, async (req, res) => {
 // Get user notifications
 router.get('/:userId', auth, async (req, res) => {
   try {
-    // TODO: Fetch from notifications collection
-    res.json({ notifications: [] });
+    const notifications = await Notification.find({ userId: req.params.userId }).sort({ createdAt: -1 });
+    res.json({ notifications });
+  } catch (error) {
+    res.status(500).json({ message: 'Server error', error: error.message });
+  }
+});
+
+// Mark a notification as read
+router.put('/:id/read', auth, async (req, res) => {
+  try {
+    const notification = await Notification.findByIdAndUpdate(req.params.id, { read: true }, { new: true });
+    res.json(notification);
   } catch (error) {
     res.status(500).json({ message: 'Server error', error: error.message });
   }

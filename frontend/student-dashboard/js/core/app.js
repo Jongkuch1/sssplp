@@ -131,9 +131,9 @@ document.addEventListener('DOMContentLoaded', function() {
                     if (response.user.role === 'student') {
                         window.location.href = 'student-dashboard.html';
                     } else if (response.user.role === 'teacher') {
-                        window.location.href = '../teacher-dashboard/teacher-dashboard.html';
+                        window.location.href = '/teacher/teacher-dashboard.html';
                     } else if (response.user.role === 'admin') {
-                        window.location.href = '../admin-dashboard/admin-dashboard.html';
+                        window.location.href = '/admin/admin-dashboard.html';
                     }
                     return;
                 }
@@ -151,9 +151,9 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (user.role === 'student') {
                     window.location.href = 'student-dashboard.html';
                 } else if (user.role === 'teacher') {
-                    window.location.href = '../teacher-dashboard/teacher-dashboard.html';
+                    window.location.href = '/teacher/teacher-dashboard.html';
                 } else if (user.role === 'admin') {
-                    window.location.href = '../admin-dashboard/admin-dashboard.html';
+                    window.location.href = '/admin/admin-dashboard.html';
                 }
             } else {
                 alert('Invalid credentials. Please check your email and password.');

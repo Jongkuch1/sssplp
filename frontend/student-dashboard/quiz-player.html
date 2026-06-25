@@ -13,7 +13,7 @@
         <div class="container">
             <div class="nav-brand">
                 <a href="student-dashboard.html">
-                    <img src="logo..png" alt="SSPLP Logo" class="logo">
+                    <img src="logo.svg" alt="SSPLP Logo" class="logo">
                     <span>SSPLP</span>
                 </a>
             </div>
@@ -70,56 +70,64 @@
         </div>
     </section>
 
-    <script src="js/universal.js"></script>
-    <script src="js/student-features.js"></script>
-    <script src="js/app.js"></script>
+    <script src="js/core/universal.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
+    <script src="js/student/student-features.js"></script>
+    <script src="js/core/app.js"></script>
     <script>
         // FR12: Quiz Player with Autosave
         let currentQuestionIndex = 0;
         let quiz = null;
 
-        function initQuiz() {
+        async function initQuiz() {
             const urlParams = new URLSearchParams(window.location.search);
-            const quizId = urlParams.get('id') || 'math1';
-            
-            quiz = StudentFeatures.startQuiz(quizId);
+            const quizId = urlParams.get('id');
+
+            quiz = await StudentFeatures.getQuiz(quizId);
+            if (!quiz) {
+                alert('Quiz not found');
+                window.location.href = 'quizzes.html';
+                return;
+            }
+            StudentFeatures.startQuiz(quiz._id);
             document.getElementById('quizTitle').textContent = quiz.title;
-            
+
             if (!navigator.onLine) {
                 document.getElementById('offlineIndicator').style.display = 'inline';
             }
-            
+
             loadQuestion();
         }
 
         function loadQuestion() {
             const question = quiz.questions[currentQuestionIndex];
-            document.getElementById('questionText').textContent = question.text;
-            document.getElementById('questionCounter').textContent = 
+            document.getElementById('questionText').textContent = question.question;
+            document.getElementById('questionCounter').textContent =
                 `Question ${currentQuestionIndex + 1} of ${quiz.questions.length}`;
-            
+
             const optionsHtml = question.options.map((opt, idx) => `
                 <label class="option-item">
-                    <input type="radio" name="answer" value="${idx}" 
-                        onchange="saveAnswer(${question.id}, ${idx})">
+                    <input type="radio" name="answer" value="${idx}"
+                        onchange="saveAnswer(${currentQuestionIndex}, ${idx})">
                     <span>${opt}</span>
                 </label>
             `).join('');
-            
+
             document.getElementById('optionsContainer').innerHTML = optionsHtml;
-            
+
             // Restore saved answer
             const saved = JSON.parse(localStorage.getItem('currentQuiz') || '{}');
-            if (saved.answers && saved.answers[question.id] !== undefined) {
-                const radio = document.querySelector(`input[value="${saved.answers[question.id]}"]`);
+            if (saved.answers && saved.answers[currentQuestionIndex] !== undefined) {
+                const radio = document.querySelector(`input[value="${saved.answers[currentQuestionIndex]}"]`);
                 if (radio) radio.checked = true;
             }
-            
+
             updateButtons();
         }
 
-        function saveAnswer(questionId, answer) {
-            StudentFeatures.saveQuizAnswer(questionId, answer);
+        function saveAnswer(questionIndex, answer) {
+            StudentFeatures.saveQuizAnswer(questionIndex, answer);
         }
 
         function updateButtons() {
@@ -148,22 +156,27 @@
             }
         });
 
-        document.getElementById('submitBtn').addEventListener('click', () => {
-            const result = StudentFeatures.submitQuiz();
-            showResults(result);
+        document.getElementById('submitBtn').addEventListener('click', async () => {
+            try {
+                const result = await StudentFeatures.submitQuiz();
+                showResults(result);
+            } catch (error) {
+                console.error('Failed to submit quiz:', error);
+                Universal.showToast('Failed to submit quiz: ' + error.message, 'error');
+            }
         });
 
         function showResults(result) {
             document.getElementById('quizContent').style.display = 'none';
             document.getElementById('quizResults').style.display = 'block';
             document.getElementById('finalScore').textContent = result.score + '%';
-            
+
             const message = result.score >= 80 ? 'Excellent work!' :
                            result.score >= 60 ? 'Good job!' :
                            'Keep practicing!';
             document.getElementById('resultMessage').textContent = message;
-            
-            if (!result.synced) {
+
+            if (result.synced === false) {
                 Universal.showToast('Results will sync when online', 'warning');
             }
         }

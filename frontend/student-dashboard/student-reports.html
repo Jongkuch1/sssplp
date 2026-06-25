@@ -12,7 +12,7 @@
         <div class="container">
             <div class="nav-brand">
                 <a href="student-dashboard.html">
-                    <img src="logo..png" alt="SSPLP Logo" class="logo">
+                    <img src="logo.svg" alt="SSPLP Logo" class="logo">
                     <span>SSPLP</span>
                 </a>
             </div>
@@ -46,40 +46,38 @@
         </div>
     </section>
 
-    <script src="js/app.js"></script>
+    <script src="js/core/app.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script>
         const user = JSON.parse(localStorage.getItem('currentUser'));
-        
-        function generateReport(type) {
-            const quizAttempts = JSON.parse(localStorage.getItem('quizAttempts') || '[]')
-                .filter(a => a.studentId === user.id);
-            const submissions = JSON.parse(localStorage.getItem('submissions') || '[]')
-                .filter(s => s.studentId === user.id);
-            const resourceAccess = JSON.parse(localStorage.getItem('resourceAccess') || '[]')
-                .filter(r => r.studentId === user.id);
-            
+
+        async function generateReport(type) {
+            const quizAttempts = await Data.learning.getQuizAttempts({ studentId: user.id });
+            const submissions = await Data.submissions.getForStudent(user.id);
+
             const period = type === 'monthly' ? 30 : 90;
             const cutoff = Date.now() - (period * 86400000);
-            
-            const recentQuizzes = quizAttempts.filter(a => new Date(a.completedAt) > cutoff);
+
+            const recentQuizzes = quizAttempts.filter(a => new Date(a.createdAt) > cutoff);
             const recentSubmissions = submissions.filter(s => new Date(s.submittedAt) > cutoff);
-            const recentAccess = resourceAccess.filter(r => new Date(r.accessedAt) > cutoff);
-            
-            const avgScore = recentQuizzes.length > 0 
+
+            const avgScore = recentQuizzes.length > 0
                 ? Math.round(recentQuizzes.reduce((sum, a) => sum + a.score, 0) / recentQuizzes.length)
                 : 0;
-            
-            const totalTime = recentAccess.reduce((sum, r) => sum + (r.timeSpent || 0), 0);
-            
+
+            const progress = await Data.learning.getProgress();
+            const totalTime = progress.reduce((sum, p) => sum + (p.timeSpent || 0), 0);
+
             const subjectPerformance = {};
             recentQuizzes.forEach(a => {
-                const quiz = JSON.parse(localStorage.getItem('quizzes') || '[]').find(q => q.id === a.quizId);
-                if (quiz) {
-                    if (!subjectPerformance[quiz.subject]) subjectPerformance[quiz.subject] = [];
-                    subjectPerformance[quiz.subject].push(a.score);
+                const subject = a.quizId?.subject;
+                if (subject) {
+                    if (!subjectPerformance[subject]) subjectPerformance[subject] = [];
+                    subjectPerformance[subject].push(a.score);
                 }
             });
-            
+
             const reportHTML = `
                 <div style="padding: 30px;">
                     <div style="text-align: center; margin-bottom: 30px; border-bottom: 2px solid #6d28d9; padding-bottom: 20px;">

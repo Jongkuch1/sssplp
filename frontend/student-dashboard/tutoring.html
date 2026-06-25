@@ -60,25 +60,27 @@
     </section>
 
     <script src="js/core/i18n.js"></script>
+    <script src="js/core/api.js"></script>
+    <script src="js/core/data.js"></script>
     <script src="js/core/app.js"></script>
-    <script src="js/seed-data.js"></script>
     <script src="js/load-profile.js"></script>
     <script>
-        document.addEventListener('DOMContentLoaded', () => {
+        document.addEventListener('DOMContentLoaded', async () => {
             translatePage();
             const currentUser = JSON.parse(localStorage.getItem('currentUser') || '{}');
-            const users = JSON.parse(localStorage.getItem('users') || '[]');
+
+            const [users, meetings] = await Promise.all([
+                Data.users.list(),
+                Data.meetings.listForStudent(currentUser.id, currentUser.email)
+            ]);
+
             const teachers = users.filter(u => u.role === 'teacher');
-            
-            // Load scheduled sessions for this student (match by ID or email)
-            const bookings = JSON.parse(localStorage.getItem('bookings') || '[]')
-                .filter(b => (b.studentId === currentUser.id || b.studentId == currentUser.id || b.studentEmail === currentUser.email) && new Date(b.datetime) > new Date())
+
+            // Load scheduled sessions for this student (future sessions only)
+            const bookings = meetings
+                .filter(b => new Date(b.datetime) > new Date())
                 .sort((a, b) => new Date(a.datetime) - new Date(b.datetime));
-            
-            console.log('Current user:', currentUser);
-            console.log('All bookings:', JSON.parse(localStorage.getItem('bookings') || '[]'));
-            console.log('Filtered bookings:', bookings);
-            
+
             const sessionsContainer = document.getElementById('scheduledSessions');
             sessionsContainer.innerHTML = bookings.length ? bookings.map(s => `
                 <div style="border: 1px solid #e5e7eb; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
@@ -97,13 +99,13 @@
                     </div>
                 </div>
             `).join('') : '<p>No scheduled sessions. Book a session with a teacher below.</p>';
-            
-            // Load available teachers
+
+            // Load available teachers - link into tutoring-booking.html flow
             document.getElementById('teacherList').innerHTML = teachers.map(t => `
                 <div style="padding: 15px; border-bottom: 1px solid #e5e7eb;">
                     <strong>${t.name}</strong>
                     <p style="color: #6b7280;">${t.email}</p>
-                    <button class="btn btn-primary btn-sm" onclick="alert('Contact ${t.name} to schedule a session')">Book Session</button>
+                    <a class="btn btn-primary btn-sm" href="tutoring-booking.html">Book Session</a>
                 </div>
             `).join('') || '<p>No teachers available</p>';
         });
